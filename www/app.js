@@ -14,9 +14,11 @@ const el = {
   setup: $('sheet-setup'), setupEx: $('setup-ex'), setupHint: $('setup-hint'), setupLast: $('setup-last'),
   inSets: $('in-sets'), inReps: $('in-reps'), inLoad: $('in-load'),
   btnBack: $('btn-back'), btnStart: $('btn-start'), startErr: $('start-err'),
-  rest: $('sheet-rest'), restTime: $('resttime'), restSummary: $('rest-summary'), btnNext: $('btn-next'),
+  rest: $('sheet-rest'), restTime: $('resttime'), restFill: $('restfill'),
+  restSummary: $('rest-summary'), btnNext: $('btn-next'),
   settings: $('sheet-settings'), setEx: $('set-ex'), sliders: $('sliders'), view: $('view'),
   btnReset: $('btn-reset'), btnCloseSettings: $('btn-close-settings'),
+  btnCloseSettings2: $('btn-close-settings-2'),
 };
 
 // Slider bounds for every tunable. [min, max, step, label]
@@ -200,7 +202,7 @@ el.btnStart.addEventListener('click', async () => {
     voice.enabled = el.voice.checked;
     voice.unlock(); // must happen inside the gesture or iOS stays silent all session
     if (!landmarker) { el.startErr.textContent = 'Loading pose model…'; landmarker = await createLandmarker(); }
-    if (!stream) stream = await startCamera(el.cam, el.facing.value);
+    if (!stream) stream = await startCamera(el.cam, el.facing.dataset.value);
     el.startErr.textContent = '';
     coach.select(pendingEx, {
       sets: Number(el.inSets.value) || undefined,
@@ -235,6 +237,7 @@ function startRest(seconds, done) {
   el.rest.hidden = false;
   const tick = () => {
     el.restTime.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+    el.restFill.style.width = `${Math.max(0, (left / seconds) * 100)}%`;
     if (left-- <= 0) {
       clearInterval(id);
       voice.speak('Rest over.');
@@ -260,24 +263,50 @@ function buildSliders() {
     const range = RANGES[key];
     if (!range) continue;
     const [min, max, stepSize, label] = range;
-    const row = document.createElement('div');
-    row.className = 'row';
-    row.innerHTML = `<label for="t-${key}">${label}</label>
-      <input type="range" id="t-${key}" min="${min}" max="${max}" step="${stepSize}" value="${value}">
-      <output>${value}</output>`;
-    const input = row.querySelector('input');
+    const card = document.createElement('div');
+    card.className = 'slider';
+    card.innerHTML = `<div class="head"><label for="t-${key}"></label><output></output></div>
+      <input type="range" id="t-${key}" min="${min}" max="${max}" step="${stepSize}" value="${value}">`;
+    card.querySelector('label').textContent = label;
+    const out = card.querySelector('output');
+    out.textContent = value;
+    const input = card.querySelector('input');
     input.addEventListener('input', () => {
       const v = Number(input.value);
-      row.querySelector('output').textContent = v;
+      out.textContent = v;
       thresholds[key] = v;
       store.setThreshold(s.exId, key, v);
     });
-    el.sliders.appendChild(row);
+    el.sliders.appendChild(card);
   }
 }
 
 el.btnSettings.addEventListener('click', () => { buildSliders(); el.settings.hidden = false; });
-el.btnCloseSettings.addEventListener('click', () => { el.settings.hidden = true; });
+for (const b of [el.btnCloseSettings, el.btnCloseSettings2]) {
+  b.addEventListener('click', () => { el.settings.hidden = true; });
+}
+
+// Segmented camera control. Switching mid-session tears the old stream down so the next
+// Start re-opens on the chosen lens.
+for (const b of el.facing.querySelectorAll('button')) {
+  b.addEventListener('click', () => {
+    el.facing.dataset.value = b.dataset.facing;
+    for (const o of el.facing.querySelectorAll('button')) {
+      o.setAttribute('aria-pressed', String(o === b));
+    }
+    stopCamera(stream);
+    stream = null;
+  });
+}
+
+// −/+ steppers: easier than a numeric keypad with chalk on your hands.
+for (const b of document.querySelectorAll('[data-step]')) {
+  b.addEventListener('click', () => {
+    const input = $(b.dataset.for);
+    const next = (Number(input.value) || 0) + Number(b.dataset.step);
+    input.value = Math.min(Number(input.max), Math.max(Number(input.min), next));
+  });
+}
 el.view.addEventListener('change', () => { view = el.view.value; });
 el.btnReset.addEventListener('click', () => {
   const s = coach.state;
