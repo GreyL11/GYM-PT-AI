@@ -48,48 +48,116 @@ function bestSide(lm, keys) {
   return score('left') >= score('right') ? 'left' : 'right';
 }
 
-// ── shared fault builders (each of these is used by 3+ lifts) ────────────────────────────
+// ── shared fault builders ────────────────────────────────────────────────────────────────
+// Most lifts fail in the same handful of ways, so these are parameterised rather than retyped.
 
-const lockoutFault = (cue, joint = 'elbow') => ({
-  id: 'lockout',
-  cue,
-  phase: 'start',
+const lockoutFault = (cue, joint = 'elbow', phase = 'start') => ({
+  id: 'lockout', cue, phase,
   test: (c) => c.jointAngle(joint) < c.T.lockout,
 });
 
-const torsoLeanFault = (cue) => ({
-  id: 'torso',
-  cue,
-  phase: 'any',
+const torsoLeanFault = (cue, id = 'torso') => ({
+  id, cue, phase: 'any',
   test: (c) => torsoLean(c.W.hip, c.W.shoulder) > c.T.torsoLean,
 });
 
 const fastEccentricFault = (cue) => ({
-  id: 'eccentric',
-  cue,
-  phase: 'end',
+  id: 'eccentric', cue, phase: 'end',
   // Time from leaving the start position to arriving at the finish position.
   test: (c) => c.st.tEnd > 0 && c.st.tLeftStart > 0 && c.st.tEnd - c.st.tLeftStart < c.T.eccentricMs,
 });
 
+/** Upper arm swinging away from the torso — the universal cheat on every arm isolation lift. */
+const upperArmFault = (cue) => ({
+  id: 'elbowDrift', cue, phase: 'any',
+  test: (c) => c.jointAngle('shoulder') > c.T.upperArm,
+});
+
+/** Stopped short at the finish position. `over` = the angle is too LARGE at the bottom. */
+const shortRangeFault = (cue, joint = 'elbow') => ({
+  id: 'depth', cue, phase: 'end',
+  test: (c) => c.jointAngle(joint) > c.T.depth,
+});
+
+/** Bar drifting away from the body — measured against leg length so it scales with the lifter. */
+const barDriftFault = (cue, ref = 'knee') => ({
+  id: 'barDrift', cue, phase: 'any',
+  test: (c) => {
+    const legLen = Math.hypot(c.W.hip.x - c.W.ankle.x, c.W.hip.y - c.W.ankle.y);
+    if (legLen < 1e-6) return false;
+    return Math.abs(c.W.wrist.x - c.W[ref].x) / legLen > c.T.barDrift;
+  },
+});
+
 // ── the lifts ────────────────────────────────────────────────────────────────────────────
+//
+// `group` drives the category picker. `view` is the camera angle the rules assume; faults that
+// carry their own `view` are gated to it, because guessing at something the camera physically
+// cannot see is worse than staying quiet.
+
+const ARMS_SIDE = ['shoulder', 'elbow', 'wrist', 'hip'];
+const LEGS_SIDE = ['shoulder', 'hip', 'knee', 'ankle'];
+
+/** Bench and its incline variant differ only in bench angle, which the rules do not see. */
+const benchLike = (name, cameraHint, over = {}) => ({
+  name, group: 'Chest', view: 'side', cameraHint, needs: ARMS_SIDE,
+  rep: { start: 165, end: 80 },
+  primary: (c) => c.jointAngle('elbow'),
+  thresholds: { lockout: 163, flare: 75, wristBend: 155, asymmetry: 22, eccentricMs: 600, ...over },
+  faults: [
+    {
+      id: 'flare',
+      cue: 'Tuck the elbows. Around forty-five degrees, not flared out.',
+      phase: 'end',
+      test: (c) => c.jointAngle('shoulder') > c.T.flare,
+    },
+    lockoutFault('Finish the lockout at the top.'),
+    {
+      id: 'wrist',
+      cue: 'Stack your wrists. Knuckles to the ceiling.',
+      phase: 'any',
+      test: (c) => c.W.index && angle(c.W.elbow, c.W.wrist, c.W.index) < c.T.wristBend,
+    },
+    fastEccentricFault('Control the descent. Do not bounce it off your chest.'),
+    {
+      id: 'asymmetry',
+      cue: 'One arm is lagging. Press evenly.',
+      phase: 'any',
+      bothSides: true,
+      test: (c) => {
+        const l = pick(c.w, IDX.left), r = pick(c.w, IDX.right);
+        return Math.abs(angle(l.shoulder, l.elbow, l.wrist) - angle(r.shoulder, r.elbow, r.wrist)) > c.T.asymmetry;
+      },
+    },
+  ],
+});
+
+/** Barbell and hammer curls differ only by grip, which pose estimation cannot see. */
+const curlLike = (name, cameraHint) => ({
+  name, group: 'Biceps', view: 'side', cameraHint, needs: ARMS_SIDE,
+  rep: { start: 163, end: 55 },
+  primary: (c) => c.jointAngle('elbow'),
+  thresholds: { lockout: 155, upperArm: 28, torsoLean: 14, eccentricMs: 500 },
+  faults: [
+    upperArmFault('Elbows still. Stop swinging them forward.'),
+    torsoLeanFault('Stop swinging. Stand still and let the biceps work.', 'swing'),
+    lockoutFault('All the way down. Full stretch at the bottom.'),
+    fastEccentricFault('Slow the negative down.'),
+  ],
+});
 
 export const EXERCISES = {
+  // ── Legs ───────────────────────────────────────────────────────────────────────────────
   squat: {
     name: 'Back squat',
+    group: 'Legs',
     view: 'side',
     cameraHint: 'Phone side-on at hip height, 2–3 m away. Whole body and both feet in frame.',
-    needs: ['shoulder', 'hip', 'knee', 'ankle'],
-    // Standing tall → bottom → standing tall.
+    needs: LEGS_SIDE,
     rep: { start: 168, end: 95 },
     primary: (c) => c.jointAngle('knee'),
     thresholds: {
-      lockout: 160,      // deg — standing fully upright between reps
-      torsoLean: 55,     // deg from vertical before "chest up"
-      depthGap: 0.0,     // normalized units the hip must get BELOW the knee
-      heelLift: 0.30,    // heel rise as a fraction of foot length
-      valgusRatio: 0.82, // knee gap / ankle gap before knees count as caving
-      eccentricMs: 0,    // 0 = descent-speed check off for squat
+      lockout: 160, torsoLean: 55, depthGap: 0.0, heelLift: 0.30, valgusRatio: 0.82, eccentricMs: 0,
     },
     faults: [
       {
@@ -125,71 +193,221 @@ export const EXERCISES = {
     ],
   },
 
-  bench: {
-    name: 'Bench press',
+  rdl: {
+    name: 'Romanian deadlift',
+    group: 'Legs',
     view: 'side',
-    cameraHint: 'Phone at bench height, side-on or 45° from the foot end. Both arms in frame.',
-    needs: ['shoulder', 'elbow', 'wrist', 'hip'],
-    // Locked out → bar on chest → locked out.
-    rep: { start: 165, end: 80 },
-    primary: (c) => c.jointAngle('elbow'),
-    thresholds: {
-      lockout: 163,      // deg elbow at the top
-      flare: 75,         // deg between upper arm and torso at the bottom
-      wristBend: 155,    // deg elbow-wrist-knuckle; below this the wrist is folding back
-      asymmetry: 22,     // deg difference between left and right elbow
-      eccentricMs: 600,  // ms — faster than this down to the chest is a bounce
-      torsoLean: 90,     // unused for bench; kept so the slider set is uniform
-    },
+    cameraHint: 'Phone side-on at hip height. Whole body and the bar in frame.',
+    needs: LEGS_SIDE,
+    // Standing tall → hinged over → standing tall. Driven by the hip, not the knee.
+    rep: { start: 165, end: 100 },
+    primary: (c) => c.jointAngle('hip'),
+    thresholds: { lockout: 158, kneeMin: 150, barDrift: 0.16, depth: 115, eccentricMs: 0 },
     faults: [
       {
+        id: 'kneeBend',
+        cue: 'Less knee bend. Push the hips back, this is a hinge.',
+        phase: 'any',
+        test: (c) => c.jointAngle('knee') < c.T.kneeMin,
+      },
+      barDriftFault('Keep the bar against your legs.', 'knee'),
+      lockoutFault('Stand all the way up. Squeeze the glutes.', 'hip'),
+      shortRangeFault('Hinge further. Feel the hamstrings stretch.', 'hip'),
+    ],
+  },
+
+  lunge: {
+    name: 'Lunge',
+    group: 'Legs',
+    view: 'side',
+    cameraHint: 'Phone side-on at hip height, on your working leg. Both feet in frame.',
+    needs: LEGS_SIDE,
+    rep: { start: 165, end: 95 },
+    primary: (c) => c.jointAngle('knee'),
+    thresholds: { lockout: 158, torsoLean: 25, depth: 105, eccentricMs: 0 },
+    faults: [
+      shortRangeFault('Deeper. Back knee toward the floor.', 'knee'),
+      torsoLeanFault('Chest up. Stay tall through the torso.'),
+      lockoutFault('Stand all the way up between reps.', 'knee'),
+    ],
+  },
+
+  // ── Chest ──────────────────────────────────────────────────────────────────────────────
+  bench: benchLike(
+    'Bench press',
+    'Phone at bench height, side-on or 45° from the foot end. Both arms in frame.',
+  ),
+
+  inclineBench: benchLike(
+    'Incline bench press',
+    'Phone at bench height, side-on. Both arms and the bar path in frame.',
+    { flare: 70 }, // an incline naturally rides a touch more tucked
+  ),
+
+  pushup: {
+    name: 'Push-up',
+    group: 'Chest',
+    view: 'side',
+    cameraHint: 'Phone on the floor, side-on, 2 m away. Head to heels in frame.',
+    needs: ['shoulder', 'elbow', 'wrist', 'hip', 'knee'],
+    rep: { start: 165, end: 90 },
+    primary: (c) => c.jointAngle('elbow'),
+    thresholds: { lockout: 160, flare: 70, plank: 163, depth: 100, eccentricMs: 0 },
+    faults: [
+      {
+        id: 'plank',
+        cue: 'Straight line from head to heels. Squeeze your glutes.',
+        phase: 'any',
+        test: (c) => angle(c.W.shoulder, c.W.hip, c.W.knee) < c.T.plank,
+      },
+      {
         id: 'flare',
-        cue: 'Tuck the elbows. Around forty-five degrees, not flared out.',
+        cue: 'Elbows back, not out to the sides.',
         phase: 'end',
-        test: (c) => angle(c.W.hip, c.W.shoulder, c.W.elbow) > c.T.flare,
+        test: (c) => c.jointAngle('shoulder') > c.T.flare,
       },
-      lockoutFault('Finish the lockout at the top.'),
+      shortRangeFault('Lower all the way. Chest to the floor.'),
+      lockoutFault('Push all the way up.'),
+    ],
+  },
+
+  // ── Back ───────────────────────────────────────────────────────────────────────────────
+  deadlift: {
+    name: 'Deadlift',
+    group: 'Back',
+    view: 'side',
+    cameraHint: 'Phone side-on at hip height, 2–3 m away. Bar, shins and whole body in frame.',
+    needs: LEGS_SIDE,
+    rep: { start: 165, end: 105 },
+    primary: (c) => c.jointAngle('hip'),
+    thresholds: { lockout: 158, barDrift: 0.14, depth: 125, torsoLean: 90, eccentricMs: 0 },
+    faults: [
+      barDriftFault('Bar is drifting away from your shins. Drag it up your legs.'),
+      lockoutFault('Finish the lockout. Hips through, glutes tight.', 'hip'),
+      shortRangeFault('Get your hips down to the bar before you pull.', 'hip'),
+    ],
+  },
+
+  row: {
+    name: 'Barbell row',
+    group: 'Back',
+    view: 'side',
+    cameraHint: 'Phone side-on at hip height. Torso, bar and both arms in frame.',
+    needs: ARMS_SIDE,
+    rep: { start: 165, end: 75 },
+    primary: (c) => c.jointAngle('elbow'),
+    thresholds: { lockout: 158, torsoMin: 32, elbowPath: 55, eccentricMs: 0 },
+    faults: [
       {
-        id: 'wrist',
-        cue: 'Stack your wrists. Knuckles to the ceiling.',
+        id: 'heave',
+        cue: 'Stay hinged over. Stop standing up into it.',
         phase: 'any',
-        test: (c) => c.W.index && angle(c.W.elbow, c.W.wrist, c.W.index) < c.T.wristBend,
+        // A bent row lives at roughly 45° from vertical; standing up is how people cheat it.
+        test: (c) => torsoLean(c.W.hip, c.W.shoulder) < c.T.torsoMin,
       },
-      fastEccentricFault('Control the descent. Do not bounce it off your chest.'),
       {
-        id: 'asymmetry',
-        cue: 'One arm is lagging. Press evenly.',
-        phase: 'any',
-        bothSides: true,
+        id: 'elbowPath',
+        cue: 'Elbows tight to your body. Row to your hip, not your chest.',
+        phase: 'end',
+        test: (c) => c.jointAngle('shoulder') > c.T.elbowPath,
+      },
+      lockoutFault('Full stretch at the bottom. Let the bar hang.'),
+    ],
+  },
+
+  latPulldown: {
+    name: 'Lat pulldown',
+    group: 'Back',
+    view: 'side',
+    cameraHint: 'Phone side-on at chest height. Torso and both arms in frame.',
+    needs: ARMS_SIDE,
+    rep: { start: 168, end: 60 },
+    primary: (c) => c.jointAngle('elbow'),
+    thresholds: { lockout: 160, torsoLean: 28, depth: 80, eccentricMs: 0 },
+    faults: [
+      torsoLeanFault('Stop leaning back. Pull with your lats, not your bodyweight.'),
+      lockoutFault('Full stretch at the top. Let your shoulders rise.'),
+      shortRangeFault('Bar to your upper chest.'),
+    ],
+  },
+
+  // ── Shoulders ──────────────────────────────────────────────────────────────────────────
+  ohp: {
+    name: 'Overhead press',
+    group: 'Shoulders',
+    view: 'side',
+    cameraHint: 'Phone side-on at chest height, 2–3 m away. Full overhead reach in frame.',
+    needs: ARMS_SIDE,
+    // Racked at the shoulders → locked out overhead. Inverted arc, like the pushdown.
+    rep: { start: 80, end: 172 },
+    primary: (c) => c.jointAngle('elbow'),
+    thresholds: { lockout: 165, torsoLean: 16, barPath: 0.22, eccentricMs: 0 },
+    faults: [
+      torsoLeanFault('Stop leaning back. Squeeze your glutes and press vertically.', 'arch'),
+      {
+        id: 'lockout',
+        cue: 'Lock it out overhead.',
+        phase: 'end',
+        test: (c) => c.jointAngle('elbow') < c.T.lockout,
+      },
+      {
+        id: 'barPath',
+        cue: 'Press straight up. The bar should finish over your ears.',
+        phase: 'end',
         test: (c) => {
-          const l = pick(c.w, IDX.left), r = pick(c.w, IDX.right);
-          return Math.abs(angle(l.shoulder, l.elbow, l.wrist) - angle(r.shoulder, r.elbow, r.wrist)) > c.T.asymmetry;
+          const torso = Math.hypot(c.W.shoulder.x - c.W.hip.x, c.W.shoulder.y - c.W.hip.y);
+          if (torso < 1e-6) return false;
+          return Math.abs(c.W.wrist.x - c.W.shoulder.x) / torso > c.T.barPath;
         },
       },
     ],
   },
 
-  pushdown: {
-    name: 'Cable pushdown',
-    view: 'side',
-    cameraHint: 'Phone side-on at chest height. Whole torso and the working arm in frame.',
-    needs: ['shoulder', 'elbow', 'wrist', 'hip'],
-    // Elbow flexed at the top → locked out at the bottom → back to flexed. Inverted vs the others.
-    rep: { start: 70, end: 172 },
-    primary: (c) => c.jointAngle('elbow'),
-    thresholds: {
-      lockout: 165,     // deg at full extension
-      upperArm: 35,     // deg the upper arm may swing away from the torso
-      torsoLean: 18,    // deg — leaning in is using bodyweight, not triceps
-      eccentricMs: 0,   // off: the eccentric here is the return, not the working phase
-    },
+  lateralRaise: {
+    name: 'Lateral raise',
+    group: 'Shoulders',
+    view: 'front',
+    cameraHint: 'Phone FRONT-ON at chest height. Both arms in frame — this one needs a front view.',
+    needs: ARMS_SIDE,
+    // Abduction at the shoulder, not the elbow: arms down → out to shoulder height.
+    rep: { start: 18, end: 82 },
+    primary: (c) => c.jointAngle('shoulder'),
+    thresholds: { maxHeight: 105, elbowStraight: 145, torsoLean: 12, eccentricMs: 400 },
     faults: [
       {
-        id: 'elbowDrift',
-        cue: 'Pin your elbows to your ribs. You are pressing, not pushing down.',
-        phase: 'any',
-        test: (c) => angle(c.W.hip, c.W.shoulder, c.W.elbow) > c.T.upperArm,
+        id: 'tooHigh',
+        cue: 'Stop at shoulder height. Higher is your traps, not your delts.',
+        phase: 'end',
+        test: (c) => c.jointAngle('shoulder') > c.T.maxHeight,
       },
+      {
+        id: 'elbowBend',
+        cue: 'Keep the elbow fixed. You are curling it up.',
+        phase: 'any',
+        test: (c) => c.jointAngle('elbow') < c.T.elbowStraight,
+      },
+      torsoLeanFault('No swinging. Let the weight do the work on the way down.', 'swing'),
+      fastEccentricFault('Lower it under control.'),
+    ],
+  },
+
+  // ── Biceps ─────────────────────────────────────────────────────────────────────────────
+  curl: curlLike('Barbell curl', 'Phone side-on at chest height. Torso and both arms in frame.'),
+  hammerCurl: curlLike('Hammer curl', 'Phone side-on at chest height. Torso and both arms in frame.'),
+
+  // ── Triceps ────────────────────────────────────────────────────────────────────────────
+  pushdown: {
+    name: 'Cable pushdown',
+    group: 'Triceps',
+    view: 'side',
+    cameraHint: 'Phone side-on at chest height. Whole torso and the working arm in frame.',
+    needs: ARMS_SIDE,
+    // Elbow flexed at the top → locked out at the bottom. Inverted arc.
+    rep: { start: 70, end: 172 },
+    primary: (c) => c.jointAngle('elbow'),
+    thresholds: { lockout: 165, upperArm: 35, torsoLean: 18, eccentricMs: 0 },
+    faults: [
+      upperArmFault('Pin your elbows to your ribs. You are pressing, not pushing down.'),
       torsoLeanFault('Stand tall. Stop leaning your bodyweight into it.'),
       {
         id: 'lockout',
@@ -202,38 +420,50 @@ export const EXERCISES = {
 
   skullcrusher: {
     name: 'Skullcrusher',
+    group: 'Triceps',
     view: 'side',
     cameraHint: 'Phone low and side-on, roughly bench height, level with your shoulder.',
-    needs: ['shoulder', 'elbow', 'wrist', 'hip'],
-    // Locked out → bar to forehead → locked out.
+    needs: ARMS_SIDE,
     rep: { start: 163, end: 60 },
     primary: (c) => c.jointAngle('elbow'),
-    thresholds: {
-      lockout: 160,       // deg at the top
-      upperArmTarget: 92, // deg between torso and upper arm — should stay put all rep
-      upperArmTol: 20,    // deg of drift allowed before it becomes a pullover
-      depth: 72,          // deg elbow at the bottom; above this you stopped short
-      eccentricMs: 700,   // ms
-      torsoLean: 90,      // unused lying down
-    },
+    thresholds: { lockout: 160, upperArmTarget: 92, upperArmTol: 20, depth: 72, eccentricMs: 700 },
     faults: [
       {
         id: 'upperArm',
         cue: 'Upper arms still. You are turning it into a pullover.',
         phase: 'any',
-        test: (c) => Math.abs(angle(c.W.hip, c.W.shoulder, c.W.elbow) - c.T.upperArmTarget) > c.T.upperArmTol,
+        test: (c) => Math.abs(c.jointAngle('shoulder') - c.T.upperArmTarget) > c.T.upperArmTol,
       },
       lockoutFault('Lock it out at the top.'),
-      {
-        id: 'depth',
-        cue: 'Go deeper. Bring it to your forehead.',
-        phase: 'end',
-        test: (c) => c.jointAngle('elbow') > c.T.depth,
-      },
+      shortRangeFault('Go deeper. Bring it to your forehead.'),
       fastEccentricFault('Slow the negative down.'),
     ],
   },
+
+  dip: {
+    name: 'Triceps dip',
+    group: 'Triceps',
+    view: 'side',
+    cameraHint: 'Phone side-on at chest height, 2 m away. Whole body in frame.',
+    needs: ARMS_SIDE,
+    rep: { start: 168, end: 85 },
+    primary: (c) => c.jointAngle('elbow'),
+    thresholds: { lockout: 162, torsoLean: 22, depth: 100, eccentricMs: 500 },
+    faults: [
+      shortRangeFault('Deeper. Upper arms to parallel.'),
+      torsoLeanFault('Stay upright. Leaning forward turns this into a chest dip.'),
+      lockoutFault('Lock the elbows out at the top.'),
+      fastEccentricFault('Control the descent.'),
+    ],
+  },
 };
+
+/** Exercises grouped for the category picker, in a sensible training order. */
+export const GROUPS = ['Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps', 'Legs'];
+
+export function byGroup(group) {
+  return Object.entries(EXERCISES).filter(([, ex]) => ex.group === group).map(([id, ex]) => ({ id, ...ex }));
+}
 
 /** Thresholds an exercise ships with, cloned so the settings sliders can mutate freely. */
 export function defaultThresholds(exId) {
@@ -249,7 +479,6 @@ export function createState() {
     tEnd: 0,          // ms timestamp they arrived at the finish position
     faultFrames: {},  // consecutive frames each fault has held
     faultCounts: {},  // total times each fault fired this set — feeds progression
-    lastRepFaults: [],
   };
 }
 
@@ -283,18 +512,22 @@ export function step(exId, frame, st, T) {
     return { visible: false, angle: st.ema ?? 0, phase: st.phase, reps: st.reps, repCompleted: false, faults: [] };
   }
 
-  const ctx = {
-    lm, w, P, W, T, st, side, view,
-    jointAngle: (j) => (j === 'knee' ? angle(W.hip, W.knee, W.ankle) : angle(W.shoulder, W.elbow, W.wrist)),
+  const JOINTS = {
+    knee: () => angle(W.hip, W.knee, W.ankle),
+    elbow: () => angle(W.shoulder, W.elbow, W.wrist),
+    hip: () => angle(W.shoulder, W.hip, W.knee),
+    shoulder: () => angle(W.hip, W.shoulder, W.elbow), // upper arm relative to the torso
   };
+
+  const ctx = { lm, w, P, W, T, st, side, view, jointAngle: (j) => JOINTS[j]() };
 
   const raw = ex.primary(ctx);
   st.ema = st.ema === null ? raw : st.ema + EMA_ALPHA * (raw - st.ema);
   const a = st.ema;
 
   // ── rep state machine ──────────────────────────────────────────────────────────────────
-  // `dir` is +1 when the working phase increases the angle (pushdown) and -1 when it
-  // decreases it (squat, bench, skullcrusher). One machine covers both.
+  // `dir` is +1 when the working phase increases the angle (pushdown, overhead press, lateral
+  // raise) and -1 when it decreases it (squat, bench, curl). One machine covers both.
   const { start, end } = ex.rep;
   const dir = end > start ? 1 : -1;
   const atEnd = dir * (a - end) >= -HYSTERESIS;

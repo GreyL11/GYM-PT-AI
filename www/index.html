@@ -86,6 +86,26 @@
   input[type=range] { flex: 1.4; accent-color: var(--good); }
   #resttime { font-size: 72px; font-weight: 800; font-variant-numeric: tabular-nums; }
   .grow { flex: 1; }
+
+  /* category filter */
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chips button {
+    padding: 9px 15px; border-radius: 999px; background: #1c2129; font-size: 14px; font-weight: 550;
+  }
+  .chips button[aria-pressed="true"] { background: var(--good); color: #06210f; }
+
+  /* exercise list */
+  #exlist { display: flex; flex-direction: column; gap: 8px; }
+  #exlist button { display: flex; align-items: baseline; gap: 10px; text-align: left; padding: 15px 16px; }
+  #exlist .meta { margin-left: auto; color: var(--dim); font-size: 13px; font-weight: 450; }
+
+  /* number inputs on the setup sheet */
+  .num { display: flex; align-items: center; gap: 10px; }
+  .num label { flex: 1; font-size: 15px; }
+  .num input {
+    width: 96px; padding: 13px; border-radius: 12px; border: 1px solid #ffffff24;
+    background: #10131a; color: var(--fg); font: inherit; font-weight: 650; text-align: center;
+  }
 </style>
 </head>
 <body>
@@ -115,16 +135,17 @@
 
     <div id="bottom">
       <button id="btn-end" class="primary">End set</button>
-      <button id="btn-skip">Skip lift</button>
+      <button id="btn-skip">Change lift</button>
     </div>
   </div>
 
-  <!-- start -->
-  <section class="sheet" id="sheet-start">
+  <!-- pick a lift -->
+  <section class="sheet" id="sheet-picker">
     <h1>Trainer</h1>
-    <p>Four lifts, live form checking, on-device. Nothing is uploaded.</p>
-    <h2 id="start-ex">—</h2>
-    <p id="start-hint">—</p>
+    <p>Live form checking, on-device. Nothing is uploaded.</p>
+    <div class="chips" id="groups"></div>
+    <div id="exlist"></div>
+    <div class="grow"></div>
     <div class="row">
       <label for="facing">Camera</label>
       <select id="facing" class="chip"><option value="environment">Rear</option><option value="front">Front</option></select>
@@ -133,9 +154,20 @@
       <label for="voice">Voice cues</label>
       <input type="checkbox" id="voice" checked>
     </div>
+  </section>
+
+  <!-- set it up -->
+  <section class="sheet" id="sheet-setup" hidden>
+    <h1 id="setup-ex">—</h1>
+    <p id="setup-hint">—</p>
+    <div class="num"><label for="in-sets">Sets</label><input type="number" id="in-sets" min="1" max="20" step="1" inputmode="numeric"></div>
+    <div class="num"><label for="in-reps">Reps per set</label><input type="number" id="in-reps" min="1" max="50" step="1" inputmode="numeric"></div>
+    <div class="num"><label for="in-load">Weight (kg)</label><input type="number" id="in-load" min="0" max="500" step="2.5" inputmode="decimal"></div>
+    <p id="setup-last"></p>
     <div class="grow"></div>
     <p id="start-err" style="color:var(--bad)"></p>
-    <button class="primary" id="btn-start">Start session</button>
+    <button id="btn-back">Back</button>
+    <button class="primary" id="btn-start">Start</button>
   </section>
 
   <!-- rest -->

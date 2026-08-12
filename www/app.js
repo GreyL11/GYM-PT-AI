@@ -1,6 +1,6 @@
 import { createLandmarker, startCamera, stopCamera, drawSkeleton } from './pose.js';
-import { EXERCISES, defaultThresholds, createState, step } from './exercises.js';
-import { createCoach, createVoice, PLAN } from './coach.js';
+import { EXERCISES, GROUPS, defaultThresholds, createState, step } from './exercises.js';
+import { createCoach, createVoice, suggest } from './coach.js';
 import * as store from './store.js';
 
 const $ = (id) => document.getElementById(id);
@@ -9,8 +9,11 @@ const el = {
   exname: $('exname'), setinfo: $('setinfo'), repnum: $('repnum'), reptarget: $('reptarget'),
   cue: $('cue'), status: $('status'),
   btnEnd: $('btn-end'), btnSkip: $('btn-skip'), btnSettings: $('btn-settings'),
-  start: $('sheet-start'), startEx: $('start-ex'), startHint: $('start-hint'), startErr: $('start-err'),
-  btnStart: $('btn-start'), facing: $('facing'), voice: $('voice'),
+  picker: $('sheet-picker'), groups: $('groups'), exlist: $('exlist'),
+  facing: $('facing'), voice: $('voice'),
+  setup: $('sheet-setup'), setupEx: $('setup-ex'), setupHint: $('setup-hint'), setupLast: $('setup-last'),
+  inSets: $('in-sets'), inReps: $('in-reps'), inLoad: $('in-load'),
+  btnBack: $('btn-back'), btnStart: $('btn-start'), startErr: $('start-err'),
   rest: $('sheet-rest'), restTime: $('resttime'), restSummary: $('rest-summary'), btnNext: $('btn-next'),
   settings: $('sheet-settings'), setEx: $('set-ex'), sliders: $('sliders'), view: $('view'),
   btnReset: $('btn-reset'), btnCloseSettings: $('btn-close-settings'),
@@ -18,19 +21,27 @@ const el = {
 
 // Slider bounds for every tunable. [min, max, step, label]
 const RANGES = {
-  lockout:        [140, 180, 1,     'Lockout angle'],
-  torsoLean:      [10, 80, 1,       'Max torso lean'],
+  lockout:        [140, 180, 1,        'Lockout angle'],
+  torsoLean:      [10, 80, 1,          'Max torso lean'],
+  torsoMin:       [10, 70, 1,          'Min hinge angle'],
   depthGap:       [-0.06, 0.10, 0.005, 'Squat depth margin'],
-  heelLift:       [0.05, 0.60, 0.01, 'Heel lift allowed'],
-  valgusRatio:    [0.50, 1.00, 0.01, 'Knee cave-in limit'],
-  eccentricMs:    [0, 1500, 50,     'Min descent time (ms)'],
-  flare:          [45, 100, 1,      'Max elbow flare'],
-  wristBend:      [120, 180, 1,     'Min wrist stack angle'],
-  asymmetry:      [5, 45, 1,        'Max left/right gap'],
-  upperArm:       [10, 70, 1,       'Max upper-arm swing'],
-  upperArmTarget: [60, 120, 1,      'Upper-arm angle target'],
-  upperArmTol:    [5, 45, 1,        'Upper-arm drift allowed'],
-  depth:          [30, 110, 1,      'Bottom depth angle'],
+  depth:          [30, 140, 1,         'Bottom depth angle'],
+  heelLift:       [0.05, 0.60, 0.01,   'Heel lift allowed'],
+  valgusRatio:    [0.50, 1.00, 0.01,   'Knee cave-in limit'],
+  eccentricMs:    [0, 1500, 50,        'Min descent time (ms)'],
+  flare:          [45, 100, 1,         'Max elbow flare'],
+  wristBend:      [120, 180, 1,        'Min wrist stack angle'],
+  asymmetry:      [5, 45, 1,           'Max left/right gap'],
+  upperArm:       [10, 70, 1,          'Max upper-arm swing'],
+  upperArmTarget: [60, 120, 1,         'Upper-arm angle target'],
+  upperArmTol:    [5, 45, 1,           'Upper-arm drift allowed'],
+  plank:          [140, 180, 1,        'Min body-line angle'],
+  kneeMin:        [120, 178, 1,        'Min knee angle (hinge)'],
+  barDrift:       [0.05, 0.40, 0.01,   'Bar drift from body'],
+  barPath:        [0.05, 0.60, 0.01,   'Bar path deviation'],
+  elbowPath:      [25, 90, 1,          'Max elbow flare (row)'],
+  maxHeight:      [70, 140, 1,         'Max raise height'],
+  elbowStraight:  [100, 180, 1,        'Min elbow straightness'],
 };
 
 const voice = createVoice();
@@ -45,6 +56,8 @@ let running = false;
 let lastVideoTs = -1;
 let cueTimer = 0;
 let wakeLock = null;
+let pendingEx = null;   // exercise chosen on the picker, awaiting its numbers
+let filter = 'All';
 
 // Without this the phone screens off mid-set and the camera stops. Re-acquired on resume, because
 // Android drops the lock whenever the app goes to the background.
@@ -55,24 +68,72 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && running) keepAwake();
 });
 
-// ── screen plumbing ──────────────────────────────────────────────────────────────────────
+// ── picker ───────────────────────────────────────────────────────────────────────────────
+
+function renderGroups() {
+  el.groups.innerHTML = '';
+  for (const g of ['All', ...GROUPS]) {
+    const b = document.createElement('button');
+    b.textContent = g;
+    b.setAttribute('aria-pressed', String(g === filter));
+    b.addEventListener('click', () => { filter = g; renderGroups(); renderList(); });
+    el.groups.appendChild(b);
+  }
+}
+
+function renderList() {
+  el.exlist.innerHTML = '';
+  const items = Object.entries(EXERCISES).filter(([, ex]) => filter === 'All' || ex.group === filter);
+  for (const [id, ex] of items) {
+    const s = suggest(id);
+    const b = document.createElement('button');
+    b.innerHTML = `<span class="nm"></span><span class="meta"></span>`;
+    b.querySelector('.nm').textContent = ex.name;
+    b.querySelector('.meta').textContent = `${s.sets}×${s.reps} · ${s.load} kg`;
+    b.addEventListener('click', () => showSetup(id));
+    el.exlist.appendChild(b);
+  }
+}
+
+function showPicker() {
+  running = false;
+  pendingEx = null;
+  coach.clear();
+  el.setup.hidden = true;
+  el.rest.hidden = true;
+  el.picker.hidden = false;
+  renderGroups();
+  renderList();
+}
+
+function showSetup(exId) {
+  pendingEx = exId;
+  const ex = EXERCISES[exId];
+  const s = suggest(exId);
+  el.setupEx.textContent = ex.name;
+  el.setupHint.textContent = ex.cameraHint;
+  el.inSets.value = s.sets;
+  el.inReps.value = s.reps;
+  el.inLoad.value = s.load;
+
+  const done = store.history(exId).slice(-3);
+  el.setupLast.textContent = done.length
+    ? `Last time: ${done.map((d) => d.reps).join(', ')} reps at ${done.at(-1).load} kg.`
+    : 'First time on this lift.';
+
+  el.picker.hidden = true;
+  el.setup.hidden = false;
+}
+
+// ── HUD ──────────────────────────────────────────────────────────────────────────────────
 
 function refreshHud() {
   const s = coach.state;
-  if (s.finished) {
-    el.exname.textContent = 'Session complete';
-    el.setinfo.textContent = 'Nice work.';
-    el.btnEnd.disabled = el.btnSkip.disabled = true;
-    running = false;
-    voice.speak('Session complete. Well done.');
-    return;
-  }
+  if (s.idle) return;
   el.exname.textContent = s.name;
   el.setinfo.textContent = `Set ${s.set}/${s.sets} · ${s.targetReps} reps · ${s.load} kg`;
   el.reptarget.textContent = `/ ${s.targetReps}`;
   el.repnum.textContent = '0';
-  el.startEx.textContent = s.name;
-  el.startHint.textContent = s.hint;
   thresholds = s.thresholds;
   view = EXERCISES[s.exId].view;
   el.view.value = view;
@@ -118,6 +179,18 @@ function loop() {
   requestAnimationFrame(loop);
 }
 
+function beginSet() {
+  el.setup.hidden = true;
+  el.rest.hidden = true;
+  el.picker.hidden = true;
+  setState = createState();
+  refreshHud();
+  running = true;
+  keepAwake();
+  coach.announceSet();
+  requestAnimationFrame(loop);
+}
+
 // ── buttons ──────────────────────────────────────────────────────────────────────────────
 
 el.btnStart.addEventListener('click', async () => {
@@ -126,41 +199,38 @@ el.btnStart.addEventListener('click', async () => {
   try {
     voice.enabled = el.voice.checked;
     voice.unlock(); // must happen inside the gesture or iOS stays silent all session
-    el.startErr.textContent = 'Loading pose model…';
-    landmarker ??= await createLandmarker();
-    stream = await startCamera(el.cam, el.facing.value);
+    if (!landmarker) { el.startErr.textContent = 'Loading pose model…'; landmarker = await createLandmarker(); }
+    if (!stream) stream = await startCamera(el.cam, el.facing.value);
     el.startErr.textContent = '';
-    el.start.hidden = true;
-    setState = createState();
-    running = true;
-    keepAwake();
-    coach.announceSet();
-    requestAnimationFrame(loop);
+    coach.select(pendingEx, {
+      sets: Number(el.inSets.value) || undefined,
+      reps: Number(el.inReps.value) || undefined,
+      load: Number(el.inLoad.value),
+    });
+    beginSet();
   } catch (err) {
     el.startErr.textContent = `${err.name}: ${err.message}`;
+  } finally {
     el.btnStart.disabled = false;
   }
 });
 
+el.btnBack.addEventListener('click', showPicker);
+
 el.btnEnd.addEventListener('click', () => {
   const r = coach.endSet(setState);
   setState = createState();
+  running = false;
   el.restSummary.textContent = r.verdict
-    ? `${r.record.reps} reps · ${r.faults} corrections. Next session: ${r.verdict.to} kg (${r.verdict.reason}).`
+    ? `${r.record.reps} reps · ${r.faults} corrections. Next time: ${r.verdict.to} kg (${r.verdict.reason}).`
     : `${r.record.reps} reps · ${r.faults} corrections.`;
-  refreshHud();
-  startRest(r.rest);
+  el.btnNext.textContent = r.done ? 'Pick next lift' : 'Next set';
+  startRest(r.rest, r.done);
 });
 
-el.btnSkip.addEventListener('click', () => {
-  coach.skipExercise();
-  setState = createState();
-  refreshHud();
-  if (!coach.state.finished) coach.announceSet();
-});
+el.btnSkip.addEventListener('click', showPicker);
 
-function startRest(seconds) {
-  if (coach.state.finished) return;
+function startRest(seconds, done) {
   let left = seconds;
   el.rest.hidden = false;
   const tick = () => {
@@ -174,8 +244,8 @@ function startRest(seconds) {
   const id = setInterval(tick, 1000);
   el.btnNext.onclick = () => {
     clearInterval(id);
-    el.rest.hidden = true;
-    coach.announceSet();
+    if (done) showPicker();
+    else { refreshHud(); beginSet(); }
   };
 }
 
@@ -183,6 +253,7 @@ function startRest(seconds) {
 
 function buildSliders() {
   const s = coach.state;
+  if (s.idle) return;
   el.setEx.textContent = s.name;
   el.sliders.innerHTML = '';
   for (const [key, value] of Object.entries(thresholds)) {
@@ -210,6 +281,7 @@ el.btnCloseSettings.addEventListener('click', () => { el.settings.hidden = true;
 el.view.addEventListener('change', () => { view = el.view.value; });
 el.btnReset.addEventListener('click', () => {
   const s = coach.state;
+  if (s.idle) return;
   thresholds = defaultThresholds(s.exId);
   for (const [k, v] of Object.entries(thresholds)) store.setThreshold(s.exId, k, v);
   buildSliders();
@@ -220,7 +292,7 @@ window.addEventListener('pagehide', () => stopCamera(stream));
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
-refreshHud();
+showPicker();
 
 // Exposed for poking at in the console: `trainer.store.read()` to see your log.
-globalThis.trainer = { coach, store, PLAN, get thresholds() { return thresholds; } };
+globalThis.trainer = { coach, store, EXERCISES, get thresholds() { return thresholds; } };

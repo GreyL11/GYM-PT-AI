@@ -1,29 +1,38 @@
-// The PT layer: what to lift, how much, counting it out loud, and deciding next week's load.
+// The PT layer: rep callouts, cue throttling, and deciding next session's load.
 // Deliberately rules, not a model — progression is arithmetic and a coach's voice is a lookup.
+//
+// You pick the lift and the numbers; this just holds you to them. DEFAULTS only prefills the
+// setup screen, so an exercise with no entry still works on FALLBACK.
 
 import { EXERCISES, defaultThresholds } from './exercises.js';
 import * as store from './store.js';
 
-export const PLAN = [
-  { exId: 'squat',        sets: 3, reps: 5,  startLoad: 40, increment: 5,   rest: 180 },
-  { exId: 'bench',        sets: 3, reps: 5,  startLoad: 30, increment: 2.5, rest: 180 },
-  { exId: 'skullcrusher', sets: 3, reps: 10, startLoad: 15, increment: 2.5, rest: 90  },
-  { exId: 'pushdown',     sets: 3, reps: 12, startLoad: 20, increment: 2.5, rest: 60  },
-];
+const FALLBACK = { sets: 3, reps: 10, startLoad: 20, increment: 2.5, rest: 90 };
 
-const CUE_COOLDOWN_MS = 6000;   // same fault will not be repeated inside this window
-const SPEECH_GAP_MS = 1200;     // never talk over yourself
+export const DEFAULTS = {
+  squat:        { sets: 3, reps: 5,  startLoad: 40, increment: 5,   rest: 180 },
+  bench:        { sets: 3, reps: 5,  startLoad: 30, increment: 2.5, rest: 180 },
+  skullcrusher: { sets: 3, reps: 10, startLoad: 15, increment: 2.5, rest: 90  },
+  pushdown:     { sets: 3, reps: 12, startLoad: 20, increment: 2.5, rest: 60  },
+};
+
+/** What the setup screen should prefill for a lift: its defaults, with the load carried
+ *  forward from whatever progression last decided. */
+export function suggest(exId) {
+  const d = { ...FALLBACK, ...(DEFAULTS[exId] ?? {}) };
+  return { ...d, load: store.getLoad(exId, d.startLoad) };
+}
+
+const CUE_COOLDOWN_MS = 6000;      // same fault will not be repeated inside this window
+const SPEECH_GAP_MS = 1200;        // never talk over yourself
 const CLEAN_FAULTS_PER_REP = 0.34; // above this, the set was not clean enough to add weight
 
 export function createCoach({ speak }) {
-  let planIdx = 0;
+  let current = null;     // { exId, sets, reps, load, increment, rest }
   let setIdx = 0;
   let lastSpoke = 0;
   const cueAt = new Map();
-  let exerciseSets = [];  // results of the sets done so far on the current exercise
-
-  const item = () => PLAN[planIdx];
-  const exId = () => item().exId;
+  let exerciseSets = [];  // sets completed so far on the current exercise
 
   function say(text, { throttleKey, force = false } = {}) {
     const now = Date.now();
@@ -38,25 +47,43 @@ export function createCoach({ speak }) {
   }
 
   return {
+    /** Start a lift with the numbers the lifter chose. */
+    select(exId, { sets, reps, load } = {}) {
+      const d = suggest(exId);
+      current = {
+        exId,
+        sets: sets ?? d.sets,
+        reps: reps ?? d.reps,
+        load: load ?? d.load,
+        increment: d.increment,
+        rest: d.rest,
+      };
+      setIdx = 0;
+      exerciseSets = [];
+      // Remember the chosen load so the next visit prefills it, even without a progression bump.
+      store.setLoad(exId, current.load);
+      return this.state;
+    },
+
     get state() {
-      if (planIdx >= PLAN.length) return { finished: true };
-      const it = item();
+      if (!current) return { idle: true };
       return {
-        exId: it.exId,
-        name: EXERCISES[it.exId].name,
-        hint: EXERCISES[it.exId].cameraHint,
+        idle: false,
+        exId: current.exId,
+        name: EXERCISES[current.exId].name,
+        hint: EXERCISES[current.exId].cameraHint,
         set: setIdx + 1,
-        sets: it.sets,
-        targetReps: it.reps,
-        load: store.getLoad(it.exId, it.startLoad),
-        rest: it.rest,
-        thresholds: store.getThresholds(it.exId, defaultThresholds(it.exId)),
-        finished: planIdx >= PLAN.length,
+        sets: current.sets,
+        targetReps: current.reps,
+        load: current.load,
+        rest: current.rest,
+        thresholds: store.getThresholds(current.exId, defaultThresholds(current.exId)),
       };
     },
 
     announceSet() {
       const s = this.state;
+      if (s.idle) return;
       say(`${s.name}. Set ${s.set} of ${s.sets}. ${s.targetReps} reps at ${s.load} kilos.`, { force: true });
     },
 
@@ -67,7 +94,7 @@ export function createCoach({ speak }) {
         return null;
       }
       if (result.repCompleted) {
-        const left = item().reps - result.reps;
+        const left = current.reps - result.reps;
         say(left > 0 ? String(result.reps) : 'Last one done.', { force: true });
       }
       // One correction at a time. Stacking cues mid-rep is noise, not coaching.
@@ -78,58 +105,53 @@ export function createCoach({ speak }) {
 
     /** Called when the lifter racks it. `st` is the exercises.js state for the set just done. */
     endSet(st) {
-      const it = item();
       const faults = Object.values(st.faultCounts).reduce((a, b) => a + b, 0);
       const record = {
         at: new Date().toISOString(),
-        exId: it.exId,
+        exId: current.exId,
         set: setIdx + 1,
         reps: st.reps,
-        target: it.reps,
-        load: store.getLoad(it.exId, it.startLoad),
+        target: current.reps,
+        load: current.load,
         faults: { ...st.faultCounts },
       };
       store.appendLog(record);
       exerciseSets.push(record);
 
-      const hit = st.reps >= it.reps;
-      say(hit ? `Set done. ${st.reps} reps. Rest ${it.rest} seconds.`
-              : `Set done. ${st.reps} of ${it.reps}. Rest ${it.rest} seconds.`, { force: true });
+      const hit = st.reps >= current.reps;
+      say(hit ? `Set done. ${st.reps} reps. Rest ${current.rest} seconds.`
+              : `Set done. ${st.reps} of ${current.reps}. Rest ${current.rest} seconds.`, { force: true });
 
       setIdx += 1;
-      if (setIdx < it.sets) return { done: false, rest: it.rest, record, faults };
+      if (setIdx < current.sets) return { done: false, rest: current.rest, record, faults };
 
       const verdict = this.progress(exerciseSets);
-      exerciseSets = [];
-      setIdx = 0;
-      planIdx += 1;
-      return { done: true, rest: it.rest, record, faults, verdict };
+      return { done: true, rest: current.rest, record, faults, verdict };
     },
 
     /** Linear progression, gated on form. Missing reps OR a messy set holds the load. */
     progress(sets) {
-      const it = PLAN[planIdx];
-      const load = store.getLoad(it.exId, it.startLoad);
+      const { exId, load, increment } = current;
       const allReps = sets.every((s) => s.reps >= s.target);
       const totalReps = sets.reduce((a, s) => a + s.reps, 0);
       const totalFaults = sets.reduce((a, s) => a + Object.values(s.faults).reduce((x, y) => x + y, 0), 0);
       const rate = totalReps ? totalFaults / totalReps : 0;
 
       if (allReps && rate < CLEAN_FAULTS_PER_REP) {
-        const next = load + it.increment;
-        store.setLoad(it.exId, next);
+        const next = load + increment;
+        store.setLoad(exId, next);
         say(`All reps, clean. Next time ${next} kilos.`, { force: true });
         return { moved: true, from: load, to: next, reason: 'all reps clean' };
       }
-      const reason = !allReps ? 'reps missed' : 'form broke down';
       say(`Staying at ${load} kilos next time. ${!allReps ? 'You missed reps.' : 'Form broke down.'}`, { force: true });
-      return { moved: false, from: load, to: load, reason };
+      return { moved: false, from: load, to: load, reason: !allReps ? 'reps missed' : 'form broke down' };
     },
 
-    skipExercise() {
-      exerciseSets = [];
+    /** Back to the picker without finishing the lift — no progression verdict. */
+    clear() {
+      current = null;
       setIdx = 0;
-      planIdx += 1;
+      exerciseSets = [];
     },
   };
 }

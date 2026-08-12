@@ -5,7 +5,7 @@
 // under test and roughly plausible everywhere else, which is all the pure functions can tell.
 
 import assert from 'node:assert/strict';
-import { EXERCISES, defaultThresholds, createState, step, angle, torsoLean, IDX } from './www/exercises.js';
+import { EXERCISES, GROUPS, byGroup, defaultThresholds, createState, step, angle, torsoLean, IDX } from './www/exercises.js';
 
 const rad = (d) => (d * Math.PI) / 180;
 const norm = (v) => { const m = Math.hypot(v.x, v.y) || 1; return { x: v.x / m, y: v.y / m }; };
@@ -185,6 +185,48 @@ check('half a skeleton coaches nothing', () => {
   const r = run('squat', hold(6, () => body({ kneeAngle: 120, lean: 62, visibility: 0.2 })));
   assert.equal(r.faults.length, 0);
   assert.equal(r.last.visible, false);
+});
+
+// ── the wider catalogue ──────────────────────────────────────────────────────────────────
+
+check('every exercise belongs to a real category, and no category is empty', () => {
+  for (const [id, ex] of Object.entries(EXERCISES)) {
+    assert.ok(GROUPS.includes(ex.group), `${id} has group "${ex.group}", not in GROUPS`);
+    assert.ok(ex.name && ex.cameraHint && ex.faults.length, `${id} is missing metadata`);
+  }
+  for (const g of GROUPS) assert.ok(byGroup(g).length > 0, `category ${g} is empty`);
+});
+
+check('overhead press counts on the inverted arc, like the pushdown', () => {
+  const frames = [
+    ...hold(3, () => body({ elbowAngle: 78 })),
+    ...hold(6, () => body({ elbowAngle: 176 })),
+    ...hold(6, () => body({ elbowAngle: 78 })),
+  ];
+  assert.equal(run('ohp', frames).st.reps, 1);
+});
+
+check('deadlift counts off the hip hinge, not the elbow', () => {
+  // `lean` tilts the torso, so the hip angle is roughly 180 - lean.
+  const frames = [
+    ...hold(3, () => body({ lean: 12 })),   // standing, hip ~168
+    ...hold(6, () => body({ lean: 85 })),   // hinged over, hip ~95
+    ...hold(6, () => body({ lean: 12 })),
+  ];
+  assert.equal(run('deadlift', frames).st.reps, 1);
+});
+
+check('curl flags swinging elbows and a swinging torso', () => {
+  assert.ok(run('curl', hold(6, () => body({ elbowAngle: 90, shoulderAngle: 45 }))).faults.includes('elbowDrift'));
+  assert.ok(!run('curl', hold(6, () => body({ elbowAngle: 90, shoulderAngle: 10 }))).faults.includes('elbowDrift'));
+  assert.ok(run('curl', hold(6, () => body({ elbowAngle: 90, shoulderAngle: 10, lean: 25 }))).faults.includes('swing'));
+});
+
+check('lateral raise flags going above shoulder height', () => {
+  const high = run('lateralRaise', hold(6, () => body({ shoulderAngle: 125, elbowAngle: 170 })), { view: 'front' });
+  assert.ok(high.faults.includes('tooHigh'));
+  const level = run('lateralRaise', hold(6, () => body({ shoulderAngle: 88, elbowAngle: 170 })), { view: 'front' });
+  assert.ok(!level.faults.includes('tooHigh'));
 });
 
 check('every exercise threshold has a slider range defined in app.js', async () => {
