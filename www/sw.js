@@ -2,7 +2,14 @@
 // cached on first successful online run, so run the app once on wifi before you rely on it.
 
 const CACHE = 'gym-trainer-v1';
-const SHELL = ['./', 'index.html', 'app.js', 'pose.js', 'coach.js', 'exercises.js', 'store.js', 'manifest.json'];
+// Every module app.js imports. Missing one only bites on a cold offline start — the fetch handler
+// below caches whatever it successfully fetches — but "only bites at the gym with no signal" is
+// exactly the case this file exists for.
+const SHELL = [
+  './', 'index.html', 'manifest.json',
+  'app.js', 'pose.js', 'coach.js', 'exercises.js', 'store.js',
+  'insights.js', 'planner.js', 'nutrition.js', 'technique.js',
+];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

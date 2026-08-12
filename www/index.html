@@ -28,6 +28,13 @@
     --danger: #c5020c;
     --on-danger: #ffdad6;
 
+    /* Train is red, eat is green, and they stay that way everywhere. The dashboard leans on this
+       being the fastest thing on the screen to tell apart. */
+    --train: #f43f5e;
+    --on-train: #1a0006;
+    --eat: #7ee2a8;
+    --on-eat: #04170c;
+
     --touch: 64px;
     --gutter: 16px;
     --margin: 20px;
@@ -48,7 +55,8 @@
 
   /* Mono is for anything you read as an instrument: reps, weights, timers, angles. */
   .data { font: 700 16px/20px var(--mono); letter-spacing: .05em; text-transform: uppercase; }
-  .hero { font: 900 56px/52px var(--sans); letter-spacing: -.04em; text-transform: uppercase; }
+  /* Clamped: "Hi Jaswanth" must not wrap where "Hi Jo" fits fine. */
+  .hero { font: 900 clamp(38px, 13vw, 56px)/1.02 var(--sans); letter-spacing: -.04em; text-transform: uppercase; }
   .headline { font: 800 32px/36px var(--sans); letter-spacing: -.02em; text-transform: uppercase; }
 
   #stage { position: fixed; inset: 0; }
@@ -86,7 +94,7 @@
   #reptarget { margin-top: 8px; color: var(--on-surface-variant); letter-spacing: .18em; }
 
   #cue {
-    margin: auto var(--margin) 0; padding: 18px; border-radius: 2px;
+    margin: auto var(--margin) 0; padding: 18px; border-radius: 14px;
     background: var(--danger); color: #fff; font-weight: 800; font-size: 22px; line-height: 28px;
     text-align: center; opacity: 0; transition: opacity .18s;
   }
@@ -104,14 +112,19 @@
 
   /* ── buttons ─────────────────────────────────────────────────────────────────────────── */
   button {
-    flex: 0 0 auto; min-height: var(--touch); padding: 0 20px; border: 0; border-radius: 2px;
-    background: var(--sc-highest); color: var(--on-surface);
+    flex: 0 0 auto; min-height: var(--touch); padding: 0 20px; border-radius: 12px;
+    background: linear-gradient(180deg, #333332, #2b2b2a); color: var(--on-surface);
+    border: 1px solid #3d3d3c;
     font: 700 16px/20px var(--mono); letter-spacing: .05em; text-transform: uppercase;
-    transition: transform .1s;
+    transition: transform .1s, box-shadow .1s;
   }
   button:active { transform: scale(.97); }
-  button.primary { background: var(--neon); color: var(--on-neon); }
-  button:disabled { opacity: .4; }
+  button.primary {
+    background: var(--neon); color: var(--on-neon); border-color: var(--neon);
+    box-shadow: 0 0 22px -4px color-mix(in srgb, var(--neon) 65%, transparent);
+  }
+  button.primary:active { box-shadow: none; }
+  button:disabled { opacity: .4; box-shadow: none; }
   #bottom button { flex: 1; }
 
   /* ── sheets ──────────────────────────────────────────────────────────────────────────── */
@@ -123,7 +136,8 @@
   .sheet header {
     display: flex; align-items: center; justify-content: center; gap: 12px;
     height: var(--touch); flex: 0 0 auto; padding: 0 var(--margin);
-    margin-top: var(--safe-t); border-bottom: 1px solid var(--outline-variant);
+    margin-top: var(--safe-t); border-bottom: 1px solid #262626;
+    background: linear-gradient(180deg, #1a1a1a, var(--bg));
   }
   .sheet header .brand {
     font: 900 32px/36px var(--sans); font-style: italic; letter-spacing: -.05em;
@@ -136,7 +150,7 @@
   }
   .sheet .foot {
     flex: 0 0 auto; display: flex; gap: 12px; padding: 16px var(--margin) calc(var(--safe-b) + 20px);
-    border-top: 1px solid var(--outline-variant); background: var(--sc);
+    border-top: 1px solid #2a2a2a; background: linear-gradient(180deg, #1c1c1b, #131313);
   }
   .sheet .foot button { flex: 1; }
   .muted { color: var(--on-surface-variant); margin: 0; }
@@ -153,14 +167,20 @@
   }
   #groups button[aria-pressed="true"] { background: var(--neon); border-color: var(--neon); color: var(--on-neon); }
 
+  /* Every list in the app is these rows: today's session, the lift picker, the food list. Tiles
+     rather than ruled lines, so a list reads as a stack of things you can hit. */
   #exlist { flex: 1; overflow-y: auto; padding: 0 var(--margin); }
+  #exlist, .exlist { display: flex; flex-direction: column; gap: 8px; }
   #exlist button, .exlist button {
     display: flex; align-items: center; justify-content: space-between; gap: 12px;
-    width: 100%; padding: 0; background: none; border-bottom: 1px solid var(--outline-variant);
-    border-radius: 0; text-align: left;
+    width: 100%; min-height: 62px; padding: 10px 14px; text-align: left;
+    background: linear-gradient(180deg, #1e1e1d, #191918); border: 1px solid #2f2f2e;
+    border-radius: 12px;
   }
+  #exlist button:active, .exlist button:active { border-color: var(--outline-variant); }
   #exlist .nm, .exlist .nm { font: 700 20px/28px var(--sans); text-transform: none; letter-spacing: 0; }
-  #exlist .meta, .exlist .meta { color: var(--on-surface-variant); }
+  #exlist .meta, .exlist .meta { color: var(--on-surface-variant); flex: 0 0 auto; }
+  .exlist button.done { background: var(--sc-lowest); border-style: dashed; }
   .exlist button.done .nm { color: var(--on-surface-variant); text-decoration: line-through; }
   .exlist button.done .meta { color: var(--neon); }
 
@@ -181,8 +201,12 @@
     border-top: 1px solid var(--outline-variant); background: var(--sc);
   }
   /* segmented camera control */
-  #facing { display: flex; height: var(--touch); background: var(--sc-highest); border-radius: 8px; padding: 4px; }
-  #facing button { flex: 1; min-height: auto; background: none; color: var(--on-surface-variant); border-radius: 6px; }
+  #facing { display: flex; height: var(--touch); background: var(--sc-lowest); border: 1px solid #2f2f2e; border-radius: 12px; padding: 4px; }
+  /* Segments, not buttons: the raised base style would make each half look like its own control. */
+  #facing button {
+    flex: 1; min-width: 0; min-height: auto; padding: 0 8px; background: none; border: none;
+    color: var(--on-surface-variant); border-radius: 9px; font-size: 14px; white-space: nowrap;
+  }
   #facing button[aria-pressed="true"] { background: var(--neon); color: var(--on-neon); }
 
   /* voice switch — a real checkbox, restyled, so the label and keyboard still work */
@@ -237,7 +261,7 @@
   /* framing / calibration overlay — centred, never over the lifter's body region */
   #bigmsg {
     margin: 0 var(--margin); padding: 20px; text-align: center;
-    background: #131313d9; border: 1px solid var(--outline-variant); border-radius: 2px;
+    background: #131313d9; border: 1px solid var(--outline-variant); border-radius: 16px;
     backdrop-filter: blur(6px);
   }
   #bigmsg[hidden] { display: none; }
@@ -250,7 +274,11 @@
   #rest-reps { font: 900 44px/1 var(--mono); font-variant-numeric: tabular-nums; }
 
   /* ── progress ────────────────────────────────────────────────────────────────────────── */
-  .card { background: #1a1a1a; border: 1px solid #333; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+  .card {
+    background: linear-gradient(180deg, #1d1d1d, #171717); border: 1px solid #303030;
+    border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 12px;
+    box-shadow: 0 1px 0 rgba(255,255,255,.03) inset, 0 8px 24px rgba(0,0,0,.35);
+  }
   .card h2 { margin: 0; font: 800 22px/26px var(--sans); text-transform: uppercase; letter-spacing: -.02em; }
   .card .line { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
   .card .k { color: var(--on-surface-variant); font: 700 13px/18px var(--mono); letter-spacing: .05em; text-transform: uppercase; }
@@ -269,12 +297,16 @@
 
   /* ── adjust ──────────────────────────────────────────────────────────────────────────── */
   #sliders { display: flex; flex-direction: column; gap: var(--stack); }
-  .slider { background: #1a1a1a; border: 1px solid #333; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+  .slider {
+    background: linear-gradient(180deg, #1d1d1d, #171717); border: 1px solid #303030;
+    border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 14px;
+    box-shadow: 0 1px 0 rgba(255,255,255,.03) inset, 0 8px 24px rgba(0,0,0,.35);
+  }
   .slider .head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .slider label { font: 500 17px/22px var(--sans); text-transform: uppercase; letter-spacing: .04em; }
   .slider output {
     min-width: 84px; text-align: center; padding: 8px 12px; background: var(--sc-lowest);
-    border: 1px solid var(--outline-variant); color: var(--neon);
+    border: 1px solid var(--outline-variant); border-radius: 999px; color: var(--neon);
     font: 700 16px/20px var(--mono); font-variant-numeric: tabular-nums;
   }
   input[type=range] { appearance: none; width: 100%; height: 12px; border-radius: 999px; background: #333; }
@@ -293,6 +325,144 @@
     font: 700 15px/20px var(--mono); text-transform: uppercase;
   }
   .err { color: #ff8a80; margin: 0; font: 700 14px/20px var(--mono); }
+
+  /* ── dashboard ───────────────────────────────────────────────────────────────────────── */
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gutter); }
+  .grid2 > .card { padding: 14px; gap: 8px; min-width: 0; }
+  .cardlabel { font: 700 13px/18px var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+
+  /* Half a phone wide is not much. Everything in these cards is one line or it is wrong: a
+     wrapped "2,830 kcal" reads as two numbers. */
+  .grid2 .headline { font-size: 26px; line-height: 30px; }
+  .grid2 .big { font-size: 30px; line-height: 32px; }
+  .grid2 .headline, .grid2 button, .grid2 .slot {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  /* The target sits UNDER the number rather than beside it. Beside it, the only way to fit is to
+     truncate, and "860 / 2…" is a worse readout than no readout. */
+  .grid2 .big .of { display: block; font-size: 12px; line-height: 16px; }
+  .grid2 .data { font-size: 12px; letter-spacing: .04em; }
+  .grid2 > .card > button { font-size: 14px; letter-spacing: .04em; padding: 0 8px; }
+  @media (max-width: 360px) {
+    .grid2 .big { font-size: 25px; }
+    .grid2 .headline { font-size: 22px; }
+    .grid2 > .card > button { font-size: 12px; }
+  }
+  .card.train {
+    border-color: color-mix(in srgb, var(--train) 38%, #303030);
+    background:
+      radial-gradient(120% 80% at 50% -20%, color-mix(in srgb, var(--train) 14%, transparent), transparent 70%),
+      linear-gradient(180deg, #1d1d1d, #171717);
+  }
+  .card.train .cardlabel { color: var(--train); }
+  .card.eat {
+    border-color: color-mix(in srgb, var(--eat) 38%, #303030);
+    background:
+      radial-gradient(120% 80% at 50% -20%, color-mix(in srgb, var(--eat) 14%, transparent), transparent 70%),
+      linear-gradient(180deg, #1d1d1d, #171717);
+  }
+  .card.eat .cardlabel { color: var(--eat); }
+  .card .grow { flex: 1; min-height: 4px; }
+  .card .big { font: 800 30px/32px var(--sans); letter-spacing: -.03em; }
+  .card .big .of { color: var(--on-surface-variant); font: 700 15px/20px var(--mono); letter-spacing: 0; }
+  /* The two buttons that matter glow in their own colour, so the thing to do next is the
+     brightest thing on the screen. */
+  button.train {
+    background: var(--train); color: var(--on-train); border-color: var(--train); border-radius: 10px;
+    box-shadow: 0 0 22px -4px color-mix(in srgb, var(--train) 70%, transparent);
+  }
+  button.eat {
+    background: var(--eat); color: var(--on-eat); border-color: var(--eat); border-radius: 10px;
+    box-shadow: 0 0 22px -4px color-mix(in srgb, var(--eat) 70%, transparent);
+  }
+  button.train:active, button.eat:active { box-shadow: none; transform: translateY(1px); }
+
+  /* Meal slots: ticked when something was logged in that part of the day. */
+  .slots { display: flex; flex-direction: column; gap: 6px; }
+  .slot { display: flex; align-items: center; gap: 8px; font: 700 12px/16px var(--mono); letter-spacing: .08em;
+          text-transform: uppercase; color: var(--on-surface-variant); }
+  .slot i { width: 14px; height: 14px; border: 1.5px solid var(--outline-variant); flex: 0 0 auto; }
+  .slot.on { color: var(--eat); }
+  .slot.on i { background: var(--eat); border-color: var(--eat); }
+
+  .spark { width: 100%; height: 36px; display: block; }
+  .spark .empty { stroke: var(--sc-highest); stroke-width: 3; stroke-dasharray: 10 8; }
+
+  /* Coach card — bodyweight against calories, the only pairing that says whether it is working. */
+  #coach-chart { width: 100%; height: 150px; display: block; }
+  #coach-chart .grid { stroke: #2b2b2b; stroke-width: 1; }
+  #coach-chart .kg { fill: none; stroke: var(--train); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+  #coach-chart .kcal { fill: none; stroke: var(--eat); stroke-width: 2; stroke-dasharray: 3 4; }
+  #coach-chart .dot { fill: var(--train); }
+  #coach-chart .target { stroke: color-mix(in srgb, var(--eat) 45%, transparent); stroke-width: 1; stroke-dasharray: 2 5; }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; }
+  .legend span { display: flex; align-items: center; gap: 6px; font: 700 11px/16px var(--mono);
+                 letter-spacing: .08em; text-transform: uppercase; color: var(--on-surface-variant); }
+  .legend i { width: 14px; height: 3px; border-radius: 2px; }
+  .coachline { color: var(--on-surface); font: 500 15px/22px var(--sans); margin: 0; }
+  .suggest {
+    border-top: 1px solid var(--sc-high); padding-top: 12px; display: flex;
+    flex-direction: column; gap: 10px;
+  }
+  .suggest .row { gap: 8px; }
+  .suggest button { flex: 1; min-height: 48px; font-size: 14px; }
+
+  /* Bottom tab bar. Same buttons as before, just reading as tabs. */
+  .tabs { display: flex; gap: 4px; }
+  .tabs button {
+    flex: 1; min-width: 0; flex-direction: column; gap: 2px; padding: 8px 2px; min-height: 58px;
+    background: none; border: none; border-top: 2px solid transparent; color: var(--on-surface-variant);
+    font: 700 11px/14px var(--mono); letter-spacing: .08em;
+  }
+  .tabs button .ic { font-size: 20px; line-height: 22px; }
+  /* No current-tab state: the bar only exists on the home screen, so none of them is ever "on". */
+
+  input[type=text] {
+    width: 100%; min-height: 52px; padding: 0 14px; background: var(--sc-high); color: var(--on-surface);
+    border: 1px solid var(--outline-variant); border-radius: 2px; font: 500 17px/22px var(--sans);
+  }
+  input[type=text]:focus, textarea:focus { outline: none; border-color: var(--neon); }
+  textarea {
+    width: 100%; padding: 12px 14px; background: var(--sc-high); color: var(--on-surface);
+    border: 1px solid var(--outline-variant); border-radius: 12px; resize: vertical;
+    font: 500 14px/20px var(--mono);
+  }
+  .howto-step p { margin: 4px 0 0; font: 500 16px/23px var(--sans); }
+  .howto-step + .howto-step { margin-top: 14px; }
+  details > summary {
+    cursor: pointer; padding: 14px 0; font: 700 15px/20px var(--mono);
+    text-transform: uppercase; letter-spacing: .05em; color: var(--on-surface-variant);
+  }
+  details[open] > summary { color: var(--on-surface); }
+  details > *:not(summary) { margin-bottom: 12px; }
+
+  /* eat — the food rows reuse .exlist, the macro bars reuse .bar */
+  .foodrow { display: flex; align-items: center; gap: 10px; }
+  .foodrow .nm {
+    flex: 1; min-width: 0; display: block; text-align: left;
+    font: 700 17px/22px var(--sans); text-transform: none; letter-spacing: 0;
+  }
+  .foodrow .nm div:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .foodrow .nm div:last-child {
+    color: var(--on-surface-variant); font: 700 12px/16px var(--mono);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .foodrow .qty {
+    flex: 0 0 auto; text-align: right; font: 700 14px/20px var(--mono);
+    font-variant-numeric: tabular-nums; color: var(--eat);
+  }
+  /* `.exlist button` is width:100%, which inside a flex row makes every button eat the whole row.
+     These need an explicit width to sit next to each other. */
+  .foodrow > button {
+    flex: 0 0 auto; width: 46px; min-height: 46px; padding: 0; border-radius: 10px;
+    justify-content: center; border-bottom: none;
+  }
+  .foodrow.logged {
+    padding: 8px 8px 8px 14px; background: var(--sc-lowest);
+    border: 1px solid #2a2a29; border-radius: 12px;
+  }
+  .foodrow.logged > button { color: var(--on-surface-variant); font-size: 22px; background: none; border-color: transparent; }
+  #eatlist .foodrow > button:first-child { flex: 1; width: auto; text-align: left; padding: 10px 12px; justify-content: flex-start; }
 </style>
 </head>
 <body>
@@ -338,17 +508,149 @@
     <header><div class="brand">Trainer</div></header>
     <div class="body">
       <div>
-        <div id="today-day" class="data" style="color:var(--on-surface-variant)">—</div>
-        <h1 id="today-name" class="hero" style="margin:6px 0 0">—</h1>
+        <div id="today-day" class="data" style="color:var(--train)">—</div>
+        <h1 id="today-greet" class="hero" style="margin:6px 0 0">—</h1>
       </div>
+
+      <div class="grid2">
+        <div class="card train">
+          <div class="cardlabel">Train</div>
+          <div id="today-name" class="headline">—</div>
+          <div id="train-stats" class="muted data"></div>
+          <div class="grow"></div>
+          <button id="btn-start-today" class="train">Start</button>
+        </div>
+
+        <div class="card eat">
+          <div class="cardlabel">Eat</div>
+          <div id="eat-kcal" class="big"></div>
+          <div id="meal-slots" class="slots"></div>
+          <div class="grow"></div>
+          <button id="btn-eat" class="eat">+ Log meal</button>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div class="card">
+          <div class="line">
+            <span class="cardlabel" style="color:var(--eat)">Weight</span>
+            <button id="btn-log-weight" style="min-height:28px;padding:0 10px;font-size:12px">+ Log</button>
+          </div>
+          <div id="weight-now" class="big"></div>
+          <div id="weight-spark"></div>
+        </div>
+
+        <div class="card">
+          <div class="cardlabel">Protein</div>
+          <div id="protein-now" class="big"></div>
+          <div class="bar"><div class="track"><div id="protein-fill" class="fill"></div></div></div>
+        </div>
+      </div>
+
       <div id="todaylist" class="exlist"></div>
       <p id="today-note" class="muted data"></p>
+
+      <div class="card" id="coach-card">
+        <div class="line">
+          <span class="cardlabel" style="color:var(--train)">Coach</span>
+          <span class="cardlabel" id="coach-drift"></span>
+        </div>
+        <div class="cardlabel" style="color:var(--on-surface-variant)">Bodyweight · Calories · 28d</div>
+        <svg id="coach-chart" viewBox="0 0 320 150" preserveAspectRatio="none"></svg>
+        <div class="legend">
+          <span><i style="background:var(--train)"></i>Bodyweight</span>
+          <span><i style="background:var(--eat)"></i>Calories</span>
+        </div>
+        <p id="coach-line" class="coachline"></p>
+        <div id="coach-suggest" class="suggest" hidden>
+          <p id="suggest-text" class="coachline"></p>
+          <div class="row">
+            <button id="btn-accept-target" class="eat">Use it</button>
+            <button id="btn-reset-target" hidden>Back to the formula</button>
+          </div>
+        </div>
+      </div>
     </div>
-    <div class="foot">
-      <button id="btn-browse">All lifts</button>
-      <button id="btn-progress">Progress</button>
-      <button id="btn-profile">Profile</button>
+    <div class="foot tabs">
+      <button id="btn-browse"><span class="ic">&#127947;</span>Lifts</button>
+      <button id="btn-eat-tab"><span class="ic">&#127858;</span>Eat</button>
+      <button id="btn-progress"><span class="ic">&#128200;</span>Stats</button>
+      <button id="btn-profile"><span class="ic">&#128100;</span>Me</button>
     </div>
+  </section>
+
+  <!-- eat -->
+  <section class="sheet" id="sheet-eat" hidden>
+    <header>
+      <button id="btn-eat-back" type="button">&larr;</button>
+      <div class="brand" style="flex:1;text-align:center;font-size:24px">Eat</div>
+      <div style="width:44px"></div>
+    </header>
+    <div class="body">
+      <div class="card" id="eat-macros"></div>
+
+      <div>
+        <label class="fieldlabel">Today</label>
+        <div id="eat-today" class="exlist"></div>
+      </div>
+
+      <div>
+        <label class="fieldlabel">Add</label>
+        <div class="chips" id="eat-cats"></div>
+        <div id="eatlist" class="exlist"></div>
+      </div>
+
+      <details id="eat-custom">
+        <summary>Something not on the list</summary>
+        <p class="muted">Saved once, then it is in your list for good. One serving of it:</p>
+        <div class="row"><label for="f-name">Name</label></div>
+        <input type="text" id="f-name" placeholder="e.g. mum's chicken curry" autocomplete="off">
+        <div class="row"><label for="f-serving">Serving</label></div>
+        <input type="text" id="f-serving" placeholder="e.g. 1 bowl" autocomplete="off">
+        <div class="stepper">
+          <label for="f-kcal">Calories</label>
+          <div class="ctl">
+            <button type="button" data-step="-10" data-for="f-kcal">&minus;</button>
+            <input type="number" id="f-kcal" min="0" max="2000" step="10" inputmode="numeric" value="0">
+            <button type="button" data-step="10" data-for="f-kcal">+</button>
+          </div>
+        </div>
+        <div class="stepper">
+          <label for="f-protein">Protein (g)</label>
+          <div class="ctl">
+            <button type="button" data-step="-1" data-for="f-protein">&minus;</button>
+            <input type="number" id="f-protein" min="0" max="300" step="1" inputmode="numeric" value="0">
+            <button type="button" data-step="1" data-for="f-protein">+</button>
+          </div>
+        </div>
+        <div class="stepper">
+          <label for="f-carbs">Carbs (g)</label>
+          <div class="ctl">
+            <button type="button" data-step="-5" data-for="f-carbs">&minus;</button>
+            <input type="number" id="f-carbs" min="0" max="400" step="5" inputmode="numeric" value="0">
+            <button type="button" data-step="5" data-for="f-carbs">+</button>
+          </div>
+        </div>
+        <div class="stepper">
+          <label for="f-fat">Fat (g)</label>
+          <div class="ctl">
+            <button type="button" data-step="-1" data-for="f-fat">&minus;</button>
+            <input type="number" id="f-fat" min="0" max="200" step="1" inputmode="numeric" value="0">
+            <button type="button" data-step="1" data-for="f-fat">+</button>
+          </div>
+        </div>
+        <p id="food-err" class="err"></p>
+        <div id="food-clash" class="suggest" hidden>
+          <p id="food-clash-text" class="coachline"></p>
+          <div class="row">
+            <button id="btn-food-overwrite" class="eat">Fix them all</button>
+            <button id="btn-food-separate">Keep as new</button>
+          </div>
+        </div>
+        <button id="btn-save-food" class="primary">Save and add</button>
+      </details>
+    </div>
+    <div class="foot"><button id="btn-eat-done" class="eat">Done</button></div>
   </section>
 
   <!-- progress -->
@@ -371,6 +673,9 @@
     </header>
     <div class="body">
       <p class="muted">Only what changes the plan. Everything stays on this phone.</p>
+
+      <div class="row"><label for="in-name">Name</label></div>
+      <input type="text" id="in-name" placeholder="what should it call you?" autocomplete="off" maxlength="24">
 
       <div class="stepper">
         <label for="in-bw">Bodyweight (kg)</label>
@@ -418,6 +723,21 @@
         <div class="chips wrap" id="p-injuries" data-multi></div>
         <p id="profile-warn" class="err"></p>
       </div>
+
+      <details id="backup">
+        <summary>Backup</summary>
+        <p class="muted">Everything is on this phone and nowhere else. No account, no cloud — so if
+          you lose the phone, you lose the lot unless you keep a copy.</p>
+        <div class="row">
+          <button id="btn-export-file" class="primary">Save a copy</button>
+          <button id="btn-export-copy">Copy</button>
+        </div>
+        <p id="backup-msg" class="muted data"></p>
+        <label class="fieldlabel" for="restore-text" style="margin-top:12px">Restore</label>
+        <textarea id="restore-text" rows="3" placeholder="paste a backup here"></textarea>
+        <button id="btn-restore">Replace everything</button>
+        <p id="restore-err" class="err"></p>
+      </details>
     </div>
     <div class="foot"><button id="btn-save-profile" class="primary">Save</button></div>
   </section>
@@ -454,6 +774,15 @@
       <h1 id="setup-ex" class="hero" style="margin:0">—</h1>
       <div class="hintcard"><span id="setup-hint">—</span></div>
       <p id="setup-last" class="muted data"></p>
+
+      <div class="card" id="howto" hidden>
+        <div class="line">
+          <span class="cardlabel" style="color:var(--train)">How to</span>
+          <button id="btn-howto-speak" style="min-height:36px;padding:0 12px;font-size:12px">Read it out</button>
+        </div>
+        <div id="howto-body"></div>
+      </div>
+      <button id="btn-howto" type="button">How to do this lift</button>
 
       <div class="stepper">
         <label for="in-sets">Sets</label>

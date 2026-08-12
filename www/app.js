@@ -5,8 +5,10 @@ import {
 } from './exercises.js';
 import { createCoach, createVoice, suggest, warmupsFor } from './coach.js';
 import * as insights from './insights.js';
+import * as nutrition from './nutrition.js';
 import * as planner from './planner.js';
 import * as store from './store.js';
+import * as technique from './technique.js';
 
 const $ = (id) => document.getElementById(id);
 const el = {
@@ -25,7 +27,10 @@ const el = {
   pExperience: $('p-experience'), pGoal: $('p-goal'), pEquipment: $('p-equipment'),
   pInjuries: $('p-injuries'), profileWarn: $('profile-warn'),
   btnSaveProfile: $('btn-save-profile'), btnProfileBack: $('btn-profile-back'),
+  btnExportFile: $('btn-export-file'), btnExportCopy: $('btn-export-copy'), backupMsg: $('backup-msg'),
+  restoreText: $('restore-text'), btnRestore: $('btn-restore'), restoreErr: $('restore-err'),
   setup: $('sheet-setup'), setupEx: $('setup-ex'), setupHint: $('setup-hint'), setupLast: $('setup-last'),
+  howto: $('howto'), howtoBody: $('howto-body'), btnHowto: $('btn-howto'), btnHowtoSpeak: $('btn-howto-speak'),
   inSets: $('in-sets'), inReps: $('in-reps'), inLoad: $('in-load'),
   btnBack: $('btn-back'), btnStart: $('btn-start'), startErr: $('start-err'),
   btnCalibrate: $('btn-calibrate'), warmup: $('warmup'), warmupRow: $('warmup-row'),
@@ -33,6 +38,19 @@ const el = {
   restReps: $('rest-reps'), repfix: $('repfix'),
   rest: $('sheet-rest'), restTime: $('resttime'), restFill: $('restfill'),
   restSummary: $('rest-summary'), btnNext: $('btn-next'),
+  todayGreet: $('today-greet'), trainStats: $('train-stats'), btnStartToday: $('btn-start-today'),
+  eatKcal: $('eat-kcal'), mealSlots: $('meal-slots'), btnEat: $('btn-eat'), btnEatTab: $('btn-eat-tab'),
+  weightNow: $('weight-now'), weightSpark: $('weight-spark'), btnLogWeight: $('btn-log-weight'),
+  proteinNow: $('protein-now'), proteinFill: $('protein-fill'), inName: $('in-name'),
+  coachChart: $('coach-chart'), coachDrift: $('coach-drift'), coachLine: $('coach-line'),
+  coachSuggest: $('coach-suggest'), suggestText: $('suggest-text'),
+  btnAcceptTarget: $('btn-accept-target'), btnResetTarget: $('btn-reset-target'),
+  eat: $('sheet-eat'), eatMacros: $('eat-macros'), eatToday: $('eat-today'), eatCats: $('eat-cats'),
+  eatList: $('eatlist'), btnEatBack: $('btn-eat-back'), btnEatDone: $('btn-eat-done'),
+  fName: $('f-name'), fServing: $('f-serving'), fKcal: $('f-kcal'), fProtein: $('f-protein'),
+  fCarbs: $('f-carbs'), fFat: $('f-fat'), foodErr: $('food-err'), btnSaveFood: $('btn-save-food'),
+  eatCustom: $('eat-custom'), foodClash: $('food-clash'), foodClashText: $('food-clash-text'),
+  btnFoodOverwrite: $('btn-food-overwrite'), btnFoodSeparate: $('btn-food-separate'),
   settings: $('sheet-settings'), setEx: $('set-ex'), sliders: $('sliders'), view: $('view'),
   btnReset: $('btn-reset'), btnCloseSettings: $('btn-close-settings'),
   btnCloseSettings2: $('btn-close-settings-2'),
@@ -139,7 +157,7 @@ function renderList() {
   }
 }
 
-const SHEETS = () => [el.today, el.profile, el.picker, el.setup, el.rest, el.settings, el.progress];
+const SHEETS = () => [el.today, el.profile, el.picker, el.setup, el.rest, el.settings, el.progress, el.eat];
 
 function show(sheet) {
   running = false;
@@ -165,12 +183,17 @@ function showToday() {
 
   const now = new Date();
   const session = planner.today(now);
+  const profile = planner.getProfile();
   el.todayDay.textContent = WEEKDAYS[now.getDay()];
+  el.todayGreet.textContent = profile.name ? `Hi ${profile.name}` : 'Today';
   el.todayList.innerHTML = '';
+  renderEatCards(profile);
 
   if (!session) {
     const next = planner.nextTrainingDay(now);
-    el.todayName.textContent = 'Rest day';
+    el.todayName.textContent = 'Rest';
+    el.trainStats.textContent = next ? `Next: ${next.day}` : '';
+    el.btnStartToday.textContent = 'All lifts';
     el.todayNote.textContent = next
       ? `Next up: ${next.session.name} on ${next.day}. Tap "All lifts" if you want to train anyway.`
       : 'No training days set. Check your profile.';
@@ -178,6 +201,8 @@ function showToday() {
   }
 
   el.todayName.textContent = session.name;
+  el.btnStartToday.textContent = 'Start';
+  el.trainStats.textContent = `${session.exercises.length} ex · ${session.exercises.reduce((a, e) => a + e.sets, 0)} sets`;
   const done = planner.doneToday(session, now);
   for (const item of session.exercises) {
     const b = document.createElement('button');
@@ -205,14 +230,397 @@ function showToday() {
   el.todayNote.textContent = notes.join(' ');
 }
 
-// ── progress ─────────────────────────────────────────────────────────────────────────────
-
 const node = (tag, cls, text) => {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
   if (text !== undefined) n.textContent = text;
   return n;
 };
+
+// ── eat ──────────────────────────────────────────────────────────────────────────────────
+
+let foodCat = 'Protein';
+
+/** The three food cards on the dashboard: calories, meal ticks, protein, bodyweight. */
+function renderEatCards(profile = planner.getProfile()) {
+  const entries = nutrition.dayEntries();
+  const t = nutrition.targets(profile);
+  const have = nutrition.totals(entries);
+
+  el.eatKcal.innerHTML = '';
+  el.eatKcal.append(
+    node('span', null, have.kcal ? String(have.kcal) : '—'),
+    node('span', 'of', ` / ${t.kcal.toLocaleString()} kcal`),
+  );
+
+  const eaten = nutrition.mealsEaten(entries);
+  el.mealSlots.innerHTML = '';
+  for (const m of nutrition.MEALS) {
+    const row = node('div', `slot${eaten.has(m) ? ' on' : ''}`);
+    row.append(node('i'), node('span', null, m));
+    el.mealSlots.appendChild(row);
+  }
+
+  // No 'under' class: being short of protein at 2pm is the normal state of a day, and a greyed
+  // bar reads as failed. The width already says how far along you are.
+  const pct = Math.round((have.protein / t.protein) * 100);
+  el.proteinNow.innerHTML = '';
+  el.proteinNow.append(node('span', null, String(have.protein)), node('span', 'of', ` / ${t.protein}g`));
+  el.proteinFill.style.width = `${Math.min(100, pct)}%`;
+  el.proteinFill.style.background = 'var(--eat)';
+
+  // Bodyweight: the number is the profile's, the history is what makes it mean anything.
+  const trend = nutrition.weightTrend();
+  el.weightNow.innerHTML = '';
+  el.weightNow.append(
+    node('span', null, `${trend.now ?? profile.bodyweight}`),
+    node('span', 'of', ` kg${trend.change === null ? '' : ` · ${trend.change > 0 ? '+' : ''}${trend.change}`}`),
+  );
+  el.weightSpark.innerHTML = '';
+  el.weightSpark.appendChild(sparkline(trend.points.map((p) => p.kg)));
+
+  renderCoach(profile);
+}
+
+const SVG = 'http://www.w3.org/2000/svg';
+const svgEl = (tag, attrs) => {
+  const n = document.createElementNS(SVG, tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  return n;
+};
+
+/**
+ * Bodyweight against calories over 28 days.
+ *
+ * Two series, two completely different units, so each is scaled to its own range inside the same
+ * box — this chart is for reading DIRECTION, not values. Gaps stay gaps: a day you logged nothing
+ * breaks the line rather than dropping it to zero.
+ */
+function renderCoach(profile) {
+  const series = nutrition.dailySeries(28);
+  const chart = el.coachChart;
+  chart.innerHTML = '';
+
+  const W = 320, H = 150, PAD = 8;
+  for (let i = 0; i <= 3; i += 1) {
+    const y = PAD + ((H - PAD * 2) / 3) * i;
+    chart.appendChild(svgEl('line', { class: 'grid', x1: 0, x2: W, y1: y, y2: y }));
+  }
+
+  const x = (i) => (i / (series.length - 1)) * (W - PAD * 2) + PAD;
+  const yFor = (lo, hi) => (v) => H - PAD - ((v - lo) / (hi - lo || 1)) * (H - PAD * 2);
+
+  /**
+   * The two series are scaled differently on purpose.
+   *
+   * Bodyweight gets its own min/max, because 2 kg over a month IS the whole story and would be a
+   * flat line on any absolute scale. Calories are scaled from zero against the TARGET, because
+   * auto-scaling them makes a normal 400 kcal swing look like a crisis — and against the target
+   * you can see the one thing that matters, which is whether you are under it.
+   */
+  const scaler = (key, vals) => {
+    if (key === 'kg') {
+      const lo = Math.min(...vals), hi = Math.max(...vals);
+      const span = hi - lo || Math.max(1, hi * 0.1);
+      return yFor(lo - span * 0.15, hi + span * 0.15);
+    }
+    return yFor(0, Math.max(targetKcal * 1.4, Math.max(...vals) * 1.1));
+  };
+
+  const targetKcal = nutrition.targets(profile).kcal;
+
+  /**
+   * Points to join up.
+   *
+   * Calories break at a gap: a day with no food logged is missing data, and drawing through it
+   * would invent a meal. Bodyweight joins straight across, because nobody weighs in daily and
+   * two weigh-ins a week apart genuinely do describe the line between them.
+   */
+  const runs = (key) => {
+    const points = series.map((d, i) => ({ i, v: d[key] })).filter((p) => p.v !== null);
+    if (key === 'kg') return points.length ? [points] : [];
+    const out = [];
+    let run = [];
+    series.forEach((d, i) => {
+      if (d[key] === null) { if (run.length) out.push(run); run = []; return; }
+      run.push({ i, v: d[key] });
+    });
+    if (run.length) out.push(run);
+    return out;
+  };
+
+  for (const [key, cls] of [['kcal', 'kcal'], ['kg', 'kg']]) {
+    const all = series.filter((d) => d[key] !== null).map((d) => d[key]);
+    if (!all.length) continue;
+    const y = scaler(key, all);
+    // The line you are aiming at, so "under target" is something you can see rather than compute.
+    if (key === 'kcal') {
+      chart.appendChild(svgEl('line', { class: 'target', x1: 0, x2: W, y1: y(targetKcal), y2: y(targetKcal) }));
+    }
+    for (const run of runs(key)) {
+      if (run.length > 1) {
+        chart.appendChild(svgEl('polyline', { class: cls, points: run.map((p) => `${x(p.i)},${y(p.v)}`).join(' ') }));
+      }
+      // Every weigh-in is a real measurement, so mark each one. A single lone point would
+      // otherwise draw nothing at all.
+      if (key === 'kg') {
+        for (const p of run) chart.appendChild(svgEl('circle', { class: 'dot', cx: x(p.i), cy: y(p.v), r: 2.5 }));
+        const last = run.at(-1);
+        chart.appendChild(svgEl('circle', { class: 'dot', cx: x(last.i), cy: y(last.v), r: 4 }));
+      }
+    }
+  }
+
+  const trend = nutrition.weightTrend(28);
+  el.coachDrift.textContent = trend.change === null ? '' : `${trend.change > 0 ? '↗' : trend.change < 0 ? '↘' : '→'} ${trend.change > 0 ? '+' : ''}${trend.change} kg`;
+  el.coachDrift.style.color = trend.change === null ? 'var(--on-surface-variant)' : 'var(--eat)';
+  el.coachLine.textContent = nutrition.coachLine(profile, series);
+
+  // The scale's correction to the calorie target, offered rather than applied.
+  const s = nutrition.suggestion(profile, series);
+  el.coachSuggest.hidden = !s && !profile.kcalTarget;
+  el.btnAcceptTarget.hidden = !s;
+  el.btnResetTarget.hidden = !profile.kcalTarget;
+  if (s) {
+    // Phrased against what is being EATEN. "Down 485" next to "eat more" is how you get someone
+    // to distrust the whole screen.
+    const move = s.eatingDelta > 0 ? `${s.eatingDelta} more` : `${Math.abs(s.eatingDelta)} less`;
+    el.suggestText.textContent = `You are ${s.reason}. You have averaged ${s.eating} kcal a day — ${move} would do it.`;
+    el.btnAcceptTarget.textContent = `Use ${s.to} kcal`;
+  } else if (profile.kcalTarget) {
+    el.suggestText.textContent = `Target set from your own numbers: ${profile.kcalTarget} kcal a day.`;
+  }
+}
+
+el.btnAcceptTarget.addEventListener('click', () => {
+  const s = nutrition.suggestion(planner.getProfile());
+  if (!s) return;
+  planner.setProfile({ kcalTarget: s.to });
+  buzz(20);
+  showToday();
+});
+
+el.btnResetTarget.addEventListener('click', () => {
+  planner.setProfile({ kcalTarget: null });
+  showToday();
+});
+
+/** A 28-day bodyweight line. Two points is enough to draw; one is just a dot, so show the
+ *  placeholder until there is something to see. */
+function sparkline(values) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'spark');
+  svg.setAttribute('viewBox', '0 0 100 36');
+  svg.setAttribute('preserveAspectRatio', 'none');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+  if (values.length < 2) {
+    path.setAttribute('class', 'empty');
+    path.setAttribute('points', '2,30 98,30');
+  } else {
+    const lo = Math.min(...values);
+    const span = Math.max(...values) - lo || 1;
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'var(--eat)');
+    path.setAttribute('stroke-width', '2');
+    path.setAttribute('points', values.map((v, i) => {
+      const x = (i / (values.length - 1)) * 96 + 2;
+      return `${x.toFixed(1)},${(32 - ((v - lo) / span) * 28).toFixed(1)}`;
+    }).join(' '));
+  }
+  svg.appendChild(path);
+  return svg;
+}
+
+function showEat() {
+  show(el.eat);
+  renderEat();
+}
+
+/** Eating, on the stats screen: hitting protein is a habit, so the useful number is how many days
+ *  you hit it — not what today looks like, which the dashboard already shows. */
+function renderEatStats(body) {
+  const profile = planner.getProfile();
+  const series = nutrition.dailySeries(14);
+  const logged = series.filter((d) => d.kcal !== null);
+  if (!logged.length) return;
+
+  const t = nutrition.targets(profile);
+  const hit = logged.filter((d) => d.protein >= t.protein).length;
+  const avgKcal = Math.round(logged.reduce((a, d) => a + d.kcal, 0) / logged.length);
+  const avgProtein = Math.round(logged.reduce((a, d) => a + d.protein, 0) / logged.length);
+
+  const card = node('div', 'card');
+  card.append(node('h2', null, 'Eating'));
+  card.append(line('Protein hit', `${hit} of ${logged.length} days`, hit / logged.length >= 0.7 ? '' : 'warn'));
+  card.append(line('Average protein', `${avgProtein} g`));
+  card.append(line('Average calories', `${avgKcal} kcal`));
+  card.append(node('p', 'muted data', `${logged.length} of the last 14 days logged`));
+  body.append(card);
+}
+
+function renderEat() {
+  const profile = planner.getProfile();
+  const entries = nutrition.dayEntries();
+  const t = nutrition.targets(profile);
+  const have = nutrition.totals(entries);
+
+  // Today against target, one bar per macro.
+  el.eatMacros.innerHTML = '';
+  el.eatMacros.append(node('h2', null, 'Today'));
+  for (const k of nutrition.MACROS) {
+    const bar = node('div', 'bar');
+    const track = node('div', 'track');
+    const fill = node('div', 'fill');
+    const pct = (have[k] / t[k]) * 100;
+    fill.style.width = `${Math.min(100, pct)}%`;
+    fill.style.background = 'var(--eat)';
+    // Only calories can be genuinely over. Being past your protein target is not a problem, and
+    // colouring it like one trains people to stop at the number.
+    if (k === 'kcal' && pct > 105) fill.classList.add('over');
+    track.append(fill);
+    bar.append(node('span', 'name', k === 'kcal' ? 'kcal' : k), track, node('span', 'n', `${have[k]}`));
+    el.eatMacros.appendChild(bar);
+  }
+  el.eatMacros.append(node('p', 'muted data', nutrition.verdict(profile, entries)));
+
+  // What you have already eaten, newest first. Removal is its own button rather than the whole
+  // row: a mis-tap on a list you are only reading should not delete your lunch.
+  const foods = nutrition.allFoods();
+  el.eatToday.innerHTML = '';
+  for (const e of [...entries].reverse()) {
+    const f = foods[e.foodId];
+    if (!f) continue;
+    const row = node('div', 'foodrow logged');
+    const text = node('span', 'nm');
+    text.append(node('div', null, f.name), node('div', null, `${nutrition.mealSlot(e.at)} · ${e.qty} × ${f.serving}`));
+    const drop = node('button', null, '×');
+    drop.type = 'button';
+    drop.setAttribute('aria-label', `Remove ${f.name}`);
+    drop.addEventListener('click', () => { store.removeMeal(e.at); buzz(10); renderEat(); });
+    row.append(text, node('span', 'qty', `${Math.round(f.protein * e.qty)}g P`), drop);
+    el.eatToday.appendChild(row);
+  }
+  if (!entries.length) el.eatToday.append(node('p', 'muted', 'Nothing yet today.'));
+
+  // Category chips, with your most-eaten foods as the first tab.
+  el.eatCats.innerHTML = '';
+  for (const c of ['Usual', ...nutrition.FOOD_CATS]) {
+    const b = node('button', null, c);
+    b.type = 'button';
+    b.setAttribute('aria-pressed', String(c === foodCat));
+    b.addEventListener('click', () => { foodCat = c; renderEat(); });
+    el.eatCats.appendChild(b);
+  }
+
+  const ids = foodCat === 'Usual'
+    ? nutrition.frequent(12).map((f) => f.foodId)
+    : Object.keys(foods).filter((id) => foods[id].cat === foodCat);
+
+  el.eatList.innerHTML = '';
+  if (!ids.length) {
+    el.eatList.append(node('p', 'muted', 'Nothing here yet. Log a few meals and your usuals collect here.'));
+  }
+  for (const id of ids) {
+    const f = foods[id];
+    const row = node('div', 'foodrow');
+    const add = document.createElement('button');
+    add.innerHTML = '<span class="nm"><div></div><div></div></span>';
+    const [nm, sub] = add.querySelectorAll('.nm div');
+    nm.textContent = f.name;
+    sub.textContent = `${f.serving} · ${f.protein}g P · ${f.kcal} kcal`;
+    add.style.flex = '1';
+    add.addEventListener('click', () => logFood(id, 1));
+
+    // Half and double servings, because "one and a bit" is how food actually arrives.
+    const half = node('button', null, '½');
+    half.type = 'button';
+    half.addEventListener('click', () => logFood(id, 0.5));
+    const twice = node('button', null, '×2');
+    twice.type = 'button';
+    twice.addEventListener('click', () => logFood(id, 2));
+
+    row.append(add, half, twice);
+    el.eatList.appendChild(row);
+  }
+}
+
+function logFood(foodId, qty) {
+  store.appendMeal({ at: new Date().toISOString(), foodId, qty });
+  buzz(10);
+  renderEat();
+}
+
+/** Write the food, log one of it, and put the form back. */
+function commitFood(id, food) {
+  store.saveFood(id, food);
+  el.foodErr.textContent = '';
+  el.foodClash.hidden = true;
+  el.fName.value = '';
+  el.fServing.value = '';
+  for (const input of [el.fKcal, el.fProtein, el.fCarbs, el.fFat]) input.value = 0;
+  el.eatCustom.open = false;
+  logFood(id, 1);
+}
+
+el.btnSaveFood.addEventListener('click', () => {
+  const name = el.fName.value.trim();
+  const kcal = Number(el.fKcal.value) || 0;
+  if (!name) { el.foodErr.textContent = 'Give it a name.'; return; }
+  if (!kcal) { el.foodErr.textContent = 'Calories cannot be zero.'; return; }
+
+  const food = {
+    name,
+    serving: el.fServing.value.trim() || '1 serving',
+    cat: 'Other',
+    kcal,
+    protein: Number(el.fProtein.value) || 0,
+    carbs: Number(el.fCarbs.value) || 0,
+    fat: Number(el.fFat.value) || 0,
+  };
+  const id = nutrition.foodId(name);
+
+  // Saving over a food you have already eaten rewrites those meals too, because a meal stores the
+  // id and not the numbers. Usually that is what you want — you are fixing an estimate. Sometimes
+  // the recipe changed and last month's dinners should stay as they were. Only you know which.
+  const used = nutrition.usageCount(id);
+  if (nutrition.allFoods()[id] && used > 0) {
+    el.foodClash.hidden = false;
+    el.foodClashText.textContent =
+      `You have logged "${nutrition.allFoods()[id].name}" ${used} time${used > 1 ? 's' : ''} already. Changing it changes ${used === 1 ? 'that entry' : 'those entries'} too.`;
+    pendingFood = { id, food, name };
+    return;
+  }
+  commitFood(id, food);
+});
+
+let pendingFood = null;
+
+el.btnFoodOverwrite.addEventListener('click', () => {
+  if (pendingFood) commitFood(pendingFood.id, pendingFood.food);
+  pendingFood = null;
+});
+
+el.btnFoodSeparate.addEventListener('click', () => {
+  if (!pendingFood) return;
+  const fresh = nutrition.uniqueFoodId(pendingFood.name);
+  commitFood(fresh.id, { ...pendingFood.food, name: fresh.name });
+  pendingFood = null;
+});
+
+el.btnEat.addEventListener('click', showEat);
+el.btnEatTab.addEventListener('click', showEat);
+el.btnEatBack.addEventListener('click', showToday);
+el.btnEatDone.addEventListener('click', showToday);
+// Bodyweight lives in the profile because it scales the lifts too — so "+ Log" goes there and
+// puts the cursor on the one field you came to change.
+el.btnLogWeight.addEventListener('click', () => {
+  showProfile();
+  el.inBw.focus();
+  el.inBw.select();
+});
+
+// ── progress ─────────────────────────────────────────────────────────────────────────────
+
 
 function line(k, v, cls) {
   const row = node('div', 'line');
@@ -225,6 +633,8 @@ function showProgress() {
   const s = insights.summary();
   const body = el.progressBody;
   body.innerHTML = '';
+
+  renderEatStats(body);
 
   if (!s.totalSets) {
     body.append(node('p', 'muted', 'Nothing logged yet. Finish a set and this fills up.'));
@@ -323,6 +733,7 @@ let draft = null;
 function showProfile() {
   show(el.profile);
   draft = planner.getProfile();
+  el.inName.value = draft.name ?? '';
   el.inBw.value = draft.bodyweight;
   el.inDays.value = draft.daysPerWeek;
 
@@ -378,8 +789,41 @@ function showSetup(exId, prefill = null) {
   el.setupLast.textContent = notes.join(' ');
   syncWarmupRow();
 
+  // Being corrected mid-rep is a bad way to learn a movement and a worse way to learn it under
+  // load, so the first time you ever do a lift you get told how before you start. "First time" is
+  // just an empty log for it — no extra state to keep in sync.
+  renderHowto(exId, done.length === 0);
+
   show(el.setup);
 }
+
+function renderHowto(exId, autoOpen) {
+  const lines = technique.lines(exId);
+  el.btnHowto.hidden = !lines.length;
+  el.howto.hidden = !lines.length || !autoOpen;
+  // Stacked, not the k/v `line()` used elsewhere: these are sentences, and squashing a sentence
+  // into a right-aligned mono column makes it unreadable.
+  el.howtoBody.innerHTML = '';
+  for (const [label, text] of lines) {
+    const block = node('div', 'howto-step');
+    block.append(node('span', 'k', label), node('p', null, text));
+    el.howtoBody.append(block);
+  }
+  el.btnHowto.textContent = el.howto.hidden ? 'How to do this lift' : 'Hide';
+
+  if (autoOpen && lines.length) {
+    voice.speak(technique.script(exId, EXERCISES[exId].cameraHint));
+  }
+}
+
+el.btnHowto.addEventListener('click', () => {
+  el.howto.hidden = !el.howto.hidden;
+  el.btnHowto.textContent = el.howto.hidden ? 'How to do this lift' : 'Hide';
+});
+
+el.btnHowtoSpeak.addEventListener('click', () => {
+  if (pendingEx) voice.speak(technique.script(pendingEx, EXERCISES[pendingEx].cameraHint));
+});
 
 /** Warm-ups only make sense on heavy compounds, so hide the toggle when it would do nothing. */
 function syncWarmupRow() {
@@ -597,6 +1041,17 @@ el.btnCalibrate.addEventListener('click', async () => {
 
 const goBack = () => (cameFromToday ? showToday() : showPicker());
 
+// The big Start button: straight into the first lift you have not done yet, or the picker on a
+// rest day. Saves the tap through the list on the day you actually train.
+el.btnStartToday.addEventListener('click', () => {
+  const now = new Date();
+  const session = planner.today(now);
+  if (!session) return showPicker();
+  const done = planner.doneToday(session, now);
+  const next = session.exercises.find((e) => !done.has(e.exId));
+  return next ? showSetup(next.exId, next) : showPicker();
+});
+
 el.btnBack.addEventListener('click', goBack);
 el.btnPickerBack.addEventListener('click', showToday);
 el.btnBrowse.addEventListener('click', showPicker);
@@ -607,12 +1062,57 @@ el.btnProgressDone.addEventListener('click', showToday);
 el.btnProfileBack.addEventListener('click', () => (planner.hasProfile() ? showToday() : null));
 
 el.btnSaveProfile.addEventListener('click', () => {
+  const bodyweight = Number(el.inBw.value) || draft.bodyweight;
   planner.setProfile({
     ...draft,
-    bodyweight: Number(el.inBw.value) || draft.bodyweight,
+    name: el.inName.value.trim(),
+    bodyweight,
     daysPerWeek: Number(el.inDays.value) || draft.daysPerWeek,
   });
+  // Weighing yourself IS editing this field, so there is no second place to log it. One point per
+  // day, so opening the profile to change something else does not fake a weigh-in.
+  store.appendWeight(bodyweight);
   showToday();
+});
+
+// ── backup ───────────────────────────────────────────────────────────────────────────────
+//
+// Two ways out, because neither is reliable everywhere: a file download is the one you want, but
+// a Capacitor WebView with no DownloadListener drops blob downloads on the floor without saying
+// so. Clipboard works in both, and pasting into your own notes is a real backup.
+
+el.btnExportFile.addEventListener('click', () => {
+  const url = URL.createObjectURL(new Blob([store.exportAll()], { type: 'application/json' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `trainer-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  el.backupMsg.textContent = 'Saved. If nothing downloaded, use Copy instead.';
+});
+
+el.btnExportCopy.addEventListener('click', async () => {
+  const text = store.exportAll();
+  try {
+    await navigator.clipboard.writeText(text);
+    el.backupMsg.textContent = `Copied — ${Math.ceil(text.length / 1024)} KB. Paste it somewhere safe.`;
+  } catch {
+    // Clipboard needs permission or a secure context; select the text so it can be copied by hand.
+    el.restoreText.value = text;
+    el.restoreText.select();
+    el.backupMsg.textContent = 'Could not copy for you — it is selected below, copy it by hand.';
+  }
+});
+
+el.btnRestore.addEventListener('click', () => {
+  try {
+    store.importAll(el.restoreText.value);
+    el.restoreErr.textContent = '';
+    el.restoreText.value = '';
+    showToday();
+  } catch (err) {
+    el.restoreErr.textContent = err.message;
+  }
 });
 
 let lastSet = null;   // so the ± correction can re-describe the set it just amended
