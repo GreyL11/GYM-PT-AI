@@ -154,13 +154,26 @@
   #groups button[aria-pressed="true"] { background: var(--neon); border-color: var(--neon); color: var(--on-neon); }
 
   #exlist { flex: 1; overflow-y: auto; padding: 0 var(--margin); }
-  #exlist button {
+  #exlist button, .exlist button {
     display: flex; align-items: center; justify-content: space-between; gap: 12px;
     width: 100%; padding: 0; background: none; border-bottom: 1px solid var(--outline-variant);
     border-radius: 0; text-align: left;
   }
-  #exlist .nm { font: 700 20px/28px var(--sans); text-transform: none; letter-spacing: 0; }
-  #exlist .meta { color: var(--on-surface-variant); }
+  #exlist .nm, .exlist .nm { font: 700 20px/28px var(--sans); text-transform: none; letter-spacing: 0; }
+  #exlist .meta, .exlist .meta { color: var(--on-surface-variant); }
+  .exlist button.done .nm { color: var(--on-surface-variant); text-decoration: line-through; }
+  .exlist button.done .meta { color: var(--neon); }
+
+  .chips.wrap { flex-wrap: wrap; overflow: visible; padding: 0; }
+  .fieldlabel {
+    display: block; margin-bottom: 12px; color: var(--on-surface-variant);
+    font: 800 20px/24px var(--sans); text-transform: uppercase; letter-spacing: -.01em;
+  }
+  .chips.wrap button {
+    min-height: 56px; border-radius: 999px; background: transparent;
+    border: 1px solid var(--outline-variant); color: var(--on-surface-variant); white-space: nowrap;
+  }
+  .chips.wrap button[aria-pressed="true"] { background: var(--neon); border-color: var(--neon); color: var(--on-neon); }
 
   #picker-controls {
     flex: 0 0 auto; display: flex; flex-direction: column; gap: 16px;
@@ -281,9 +294,90 @@
     </div>
   </div>
 
-  <!-- pick a lift -->
-  <section class="sheet" id="sheet-picker">
+  <!-- today's plan — the landing screen once a profile exists -->
+  <section class="sheet" id="sheet-today" hidden>
     <header><div class="brand">Trainer</div></header>
+    <div class="body">
+      <div>
+        <div id="today-day" class="data" style="color:var(--on-surface-variant)">—</div>
+        <h1 id="today-name" class="hero" style="margin:6px 0 0">—</h1>
+      </div>
+      <div id="todaylist" class="exlist"></div>
+      <p id="today-note" class="muted data"></p>
+    </div>
+    <div class="foot">
+      <button id="btn-browse">All lifts</button>
+      <button id="btn-profile">Profile</button>
+    </div>
+  </section>
+
+  <!-- profile -->
+  <section class="sheet" id="sheet-profile" hidden>
+    <header>
+      <button id="btn-profile-back" type="button">&larr;</button>
+      <div class="brand" style="flex:1;text-align:center;font-size:24px">Profile</div>
+      <div style="width:44px"></div>
+    </header>
+    <div class="body">
+      <p class="muted">Only what changes the plan. Everything stays on this phone.</p>
+
+      <div class="stepper">
+        <label for="in-bw">Bodyweight (kg)</label>
+        <div class="ctl">
+          <button type="button" data-step="-1" data-for="in-bw">&minus;</button>
+          <input type="number" id="in-bw" min="30" max="250" step="1" inputmode="numeric">
+          <button type="button" data-step="1" data-for="in-bw">+</button>
+        </div>
+      </div>
+
+      <div class="stepper">
+        <label for="in-days">Training days per week</label>
+        <div class="ctl">
+          <button type="button" data-step="-1" data-for="in-days">&minus;</button>
+          <input type="number" id="in-days" min="2" max="6" step="1" inputmode="numeric">
+          <button type="button" data-step="1" data-for="in-days">+</button>
+        </div>
+      </div>
+
+      <div>
+        <label class="fieldlabel" for="p-experience">Experience</label>
+        <div class="chips wrap" id="p-experience">
+          <button type="button" data-value="beginner">Beginner</button>
+          <button type="button" data-value="intermediate">Intermediate</button>
+          <button type="button" data-value="advanced">Advanced</button>
+        </div>
+      </div>
+
+      <div>
+        <label class="fieldlabel" for="p-goal">Goal</label>
+        <div class="chips wrap" id="p-goal">
+          <button type="button" data-value="strength">Strength</button>
+          <button type="button" data-value="hypertrophy">Muscle</button>
+          <button type="button" data-value="endurance">Endurance</button>
+        </div>
+      </div>
+
+      <div>
+        <label class="fieldlabel" for="p-equipment">Equipment you have</label>
+        <div class="chips wrap" id="p-equipment" data-multi></div>
+      </div>
+
+      <div>
+        <label class="fieldlabel" for="p-injuries">Anything you're nursing</label>
+        <div class="chips wrap" id="p-injuries" data-multi></div>
+        <p id="profile-warn" class="err"></p>
+      </div>
+    </div>
+    <div class="foot"><button id="btn-save-profile" class="primary">Save</button></div>
+  </section>
+
+  <!-- pick a lift -->
+  <section class="sheet" id="sheet-picker" hidden>
+    <header>
+      <button id="btn-picker-back" type="button">&larr;</button>
+      <div class="brand" style="flex:1;text-align:center">Trainer</div>
+      <div style="width:44px"></div>
+    </header>
     <div id="groups"></div>
     <div id="exlist"></div>
     <div id="picker-controls">

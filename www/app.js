@@ -1,6 +1,7 @@
 import { createLandmarker, startCamera, stopCamera, drawSkeleton } from './pose.js';
-import { EXERCISES, GROUPS, defaultThresholds, createState, step } from './exercises.js';
+import { EXERCISES, GROUPS, EQUIPMENT, INJURIES, defaultThresholds, createState, step } from './exercises.js';
 import { createCoach, createVoice, suggest } from './coach.js';
+import * as planner from './planner.js';
 import * as store from './store.js';
 
 const $ = (id) => document.getElementById(id);
@@ -10,7 +11,14 @@ const el = {
   cue: $('cue'), status: $('status'),
   btnEnd: $('btn-end'), btnSkip: $('btn-skip'), btnSettings: $('btn-settings'),
   picker: $('sheet-picker'), groups: $('groups'), exlist: $('exlist'),
-  facing: $('facing'), voice: $('voice'),
+  facing: $('facing'), voice: $('voice'), btnPickerBack: $('btn-picker-back'),
+  today: $('sheet-today'), todayDay: $('today-day'), todayName: $('today-name'),
+  todayList: $('todaylist'), todayNote: $('today-note'),
+  btnBrowse: $('btn-browse'), btnProfile: $('btn-profile'),
+  profile: $('sheet-profile'), inBw: $('in-bw'), inDays: $('in-days'),
+  pExperience: $('p-experience'), pGoal: $('p-goal'), pEquipment: $('p-equipment'),
+  pInjuries: $('p-injuries'), profileWarn: $('profile-warn'),
+  btnSaveProfile: $('btn-save-profile'), btnProfileBack: $('btn-profile-back'),
   setup: $('sheet-setup'), setupEx: $('setup-ex'), setupHint: $('setup-hint'), setupLast: $('setup-last'),
   inSets: $('in-sets'), inReps: $('in-reps'), inLoad: $('in-load'),
   btnBack: $('btn-back'), btnStart: $('btn-start'), startErr: $('start-err'),
@@ -58,8 +66,9 @@ let running = false;
 let lastVideoTs = -1;
 let cueTimer = 0;
 let wakeLock = null;
-let pendingEx = null;   // exercise chosen on the picker, awaiting its numbers
+let pendingEx = null;      // exercise chosen, awaiting its numbers
 let filter = 'All';
+let cameFromToday = true;  // so Back and "set finished" return where you actually came from
 
 // Without this the phone screens off mid-set and the camera stops. Re-acquired on resume, because
 // Android drops the lock whenever the app goes to the background.
@@ -97,21 +106,139 @@ function renderList() {
   }
 }
 
-function showPicker() {
+const SHEETS = () => [el.today, el.profile, el.picker, el.setup, el.rest, el.settings];
+
+function show(sheet) {
   running = false;
+  for (const s of SHEETS()) s.hidden = s !== sheet;
+}
+
+function showPicker() {
   pendingEx = null;
   coach.clear();
-  el.setup.hidden = true;
-  el.rest.hidden = true;
-  el.picker.hidden = false;
+  show(el.picker);
   renderGroups();
   renderList();
 }
 
-function showSetup(exId) {
+// ── today's plan ─────────────────────────────────────────────────────────────────────────
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+function showToday() {
+  pendingEx = null;
+  coach.clear();
+  show(el.today);
+
+  const now = new Date();
+  const session = planner.today(now);
+  el.todayDay.textContent = WEEKDAYS[now.getDay()];
+  el.todayList.innerHTML = '';
+
+  if (!session) {
+    const next = planner.nextTrainingDay(now);
+    el.todayName.textContent = 'Rest day';
+    el.todayNote.textContent = next
+      ? `Next up: ${next.session.name} on ${next.day}. Tap "All lifts" if you want to train anyway.`
+      : 'No training days set. Check your profile.';
+    return;
+  }
+
+  el.todayName.textContent = session.name;
+  const done = planner.doneToday(session, now);
+  for (const item of session.exercises) {
+    const b = document.createElement('button');
+    b.innerHTML = '<span class="nm"></span><span class="meta"></span>';
+    b.querySelector('.nm').textContent = item.name;
+    b.querySelector('.meta').textContent = done.has(item.exId)
+      ? 'Done'
+      : `${item.sets}×${item.reps} · ${item.load ? `${item.load} kg` : 'bodyweight'}`;
+    if (done.has(item.exId)) b.classList.add('done');
+    b.addEventListener('click', () => showSetup(item.exId, item));
+    el.todayList.appendChild(b);
+  }
+  const left = session.exercises.length - done.size;
+  el.todayNote.textContent = left ? `${left} of ${session.exercises.length} to go.` : 'Session complete. Good work.';
+}
+
+// ── profile ──────────────────────────────────────────────────────────────────────────────
+
+const LABELS = {
+  barbell: 'Barbell', dumbbell: 'Dumbbell', cable: 'Cable machine', bodyweight: 'Bodyweight',
+  shoulder: 'Shoulder', elbow: 'Elbow', lowerBack: 'Lower back', knee: 'Knee',
+};
+
+/** Chip group behaviour. `data-multi` on the container toggles; otherwise it's a radio. */
+function wireChips(container, values, selected, onChange) {
+  container.innerHTML = '';
+  const multi = container.hasAttribute('data-multi');
+  for (const v of values) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.dataset.value = v;
+    b.textContent = LABELS[v] ?? v;
+    container.appendChild(b);
+  }
+  const paint = () => {
+    for (const b of container.querySelectorAll('button')) {
+      b.setAttribute('aria-pressed', String(multi ? selected.includes(b.dataset.value) : selected === b.dataset.value));
+    }
+  };
+  container.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (multi) {
+      selected = selected.includes(b.dataset.value)
+        ? selected.filter((x) => x !== b.dataset.value)
+        : [...selected, b.dataset.value];
+    } else {
+      selected = b.dataset.value;
+    }
+    paint();
+    onChange(selected);
+  });
+  paint();
+}
+
+let draft = null;
+
+function showProfile() {
+  show(el.profile);
+  draft = planner.getProfile();
+  el.inBw.value = draft.bodyweight;
+  el.inDays.value = draft.daysPerWeek;
+
+  // These three are static markup, so wire them by value rather than rebuilding.
+  for (const [container, key] of [[el.pExperience, 'trainingAge'], [el.pGoal, 'goal']]) {
+    for (const b of container.querySelectorAll('button')) {
+      b.setAttribute('aria-pressed', String(b.dataset.value === draft[key]));
+      b.onclick = () => {
+        draft[key] = b.dataset.value;
+        for (const o of container.querySelectorAll('button')) {
+          o.setAttribute('aria-pressed', String(o === b));
+        }
+      };
+    }
+  }
+  wireChips(el.pEquipment, EQUIPMENT, [...draft.equipment], (v) => { draft.equipment = v; checkProfile(); });
+  wireChips(el.pInjuries, INJURIES, [...draft.injuries], (v) => { draft.injuries = v; checkProfile(); });
+  checkProfile();
+}
+
+/** Equipment and injuries can between them leave a muscle group with nothing to train. */
+function checkProfile() {
+  const usable = planner.available(draft);
+  const empty = GROUPS.filter((g) => !usable.some((id) => EXERCISES[id].group === g));
+  el.profileWarn.textContent = !usable.length
+    ? 'That leaves no exercises at all. Add some equipment.'
+    : empty.length ? `Nothing left for: ${empty.join(', ')}. Those days will be shorter.` : '';
+}
+
+function showSetup(exId, prefill = null) {
   pendingEx = exId;
+  cameFromToday = !el.today.hidden;
   const ex = EXERCISES[exId];
-  const s = suggest(exId);
+  const s = { ...suggest(exId), ...(prefill ?? {}) };
   el.setupEx.textContent = ex.name;
   el.setupHint.textContent = ex.cameraHint;
   el.inSets.value = s.sets;
@@ -123,8 +250,7 @@ function showSetup(exId) {
     ? `Last time: ${done.map((d) => d.reps).join(', ')} reps at ${done.at(-1).load} kg.`
     : 'First time on this lift.';
 
-  el.picker.hidden = true;
-  el.setup.hidden = false;
+  show(el.setup);
 }
 
 // ── HUD ──────────────────────────────────────────────────────────────────────────────────
@@ -182,9 +308,7 @@ function loop() {
 }
 
 function beginSet() {
-  el.setup.hidden = true;
-  el.rest.hidden = true;
-  el.picker.hidden = true;
+  for (const s of SHEETS()) s.hidden = true;
   setState = createState();
   refreshHud();
   running = true;
@@ -217,7 +341,22 @@ el.btnStart.addEventListener('click', async () => {
   }
 });
 
-el.btnBack.addEventListener('click', showPicker);
+const goBack = () => (cameFromToday ? showToday() : showPicker());
+
+el.btnBack.addEventListener('click', goBack);
+el.btnPickerBack.addEventListener('click', showToday);
+el.btnBrowse.addEventListener('click', showPicker);
+el.btnProfile.addEventListener('click', showProfile);
+el.btnProfileBack.addEventListener('click', () => (planner.hasProfile() ? showToday() : null));
+
+el.btnSaveProfile.addEventListener('click', () => {
+  planner.setProfile({
+    ...draft,
+    bodyweight: Number(el.inBw.value) || draft.bodyweight,
+    daysPerWeek: Number(el.inDays.value) || draft.daysPerWeek,
+  });
+  showToday();
+});
 
 el.btnEnd.addEventListener('click', () => {
   const r = coach.endSet(setState);
@@ -230,7 +369,7 @@ el.btnEnd.addEventListener('click', () => {
   startRest(r.rest, r.done);
 });
 
-el.btnSkip.addEventListener('click', showPicker);
+el.btnSkip.addEventListener('click', goBack);
 
 function startRest(seconds, done) {
   let left = seconds;
@@ -247,7 +386,7 @@ function startRest(seconds, done) {
   const id = setInterval(tick, 1000);
   el.btnNext.onclick = () => {
     clearInterval(id);
-    if (done) showPicker();
+    if (done) goBack();
     else { refreshHud(); beginSet(); }
   };
 }
@@ -321,7 +460,9 @@ window.addEventListener('pagehide', () => stopCamera(stream));
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
-showPicker();
+// First run has nothing to plan from, so ask before showing an empty day.
+if (planner.hasProfile()) showToday();
+else showProfile();
 
 // Exposed for poking at in the console: `trainer.store.read()` to see your log.
-globalThis.trainer = { coach, store, EXERCISES, get thresholds() { return thresholds; } };
+globalThis.trainer = { coach, store, planner, EXERCISES, get thresholds() { return thresholds; } };

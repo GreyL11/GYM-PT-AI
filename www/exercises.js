@@ -458,6 +458,39 @@ export const EXERCISES = {
   },
 };
 
+// ── planning metadata ────────────────────────────────────────────────────────────────────
+// Kept in one table rather than sprinkled through the definitions above, because it belongs to
+// the planner, not the form rules — those two never need to change together.
+//
+//   equipment  what you need to do it, so the planner can skip what your gym lacks
+//   compound   multi-joint lifts get the heavy low-rep slots and go first in a session
+//   avoidFor   injuries this lift aggravates
+//   loadRatio  starting weight as a fraction of bodyweight; 0 means the lift IS your bodyweight
+
+const META = {
+  squat:        { equipment: 'barbell',    compound: true,  avoidFor: ['knee', 'lowerBack'], loadRatio: 0.60 },
+  rdl:          { equipment: 'barbell',    compound: true,  avoidFor: ['lowerBack'],         loadRatio: 0.50 },
+  lunge:        { equipment: 'dumbbell',   compound: true,  avoidFor: ['knee'],              loadRatio: 0.20 },
+  bench:        { equipment: 'barbell',    compound: true,  avoidFor: ['shoulder'],          loadRatio: 0.50 },
+  inclineBench: { equipment: 'barbell',    compound: true,  avoidFor: ['shoulder'],          loadRatio: 0.40 },
+  pushup:       { equipment: 'bodyweight', compound: true,  avoidFor: [],                    loadRatio: 0 },
+  deadlift:     { equipment: 'barbell',    compound: true,  avoidFor: ['lowerBack'],         loadRatio: 0.75 },
+  row:          { equipment: 'barbell',    compound: true,  avoidFor: ['lowerBack'],         loadRatio: 0.45 },
+  latPulldown:  { equipment: 'cable',      compound: true,  avoidFor: [],                    loadRatio: 0.50 },
+  ohp:          { equipment: 'barbell',    compound: true,  avoidFor: ['shoulder'],          loadRatio: 0.30 },
+  lateralRaise: { equipment: 'dumbbell',   compound: false, avoidFor: ['shoulder'],          loadRatio: 0.06 },
+  curl:         { equipment: 'barbell',    compound: false, avoidFor: ['elbow'],             loadRatio: 0.20 },
+  hammerCurl:   { equipment: 'dumbbell',   compound: false, avoidFor: ['elbow'],             loadRatio: 0.10 },
+  pushdown:     { equipment: 'cable',      compound: false, avoidFor: ['elbow'],             loadRatio: 0.25 },
+  skullcrusher: { equipment: 'barbell',    compound: false, avoidFor: ['elbow'],             loadRatio: 0.20 },
+  dip:          { equipment: 'bodyweight', compound: true,  avoidFor: ['shoulder', 'elbow'], loadRatio: 0 },
+};
+
+for (const [id, m] of Object.entries(META)) Object.assign(EXERCISES[id], m);
+
+export const EQUIPMENT = ['barbell', 'dumbbell', 'cable', 'bodyweight'];
+export const INJURIES = ['shoulder', 'elbow', 'lowerBack', 'knee'];
+
 /** Exercises grouped for the category picker, in a sensible training order. */
 export const GROUPS = ['Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps', 'Legs'];
 

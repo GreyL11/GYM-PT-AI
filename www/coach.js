@@ -5,22 +5,18 @@
 // setup screen, so an exercise with no entry still works on FALLBACK.
 
 import { EXERCISES, defaultThresholds } from './exercises.js';
+import * as planner from './planner.js';
 import * as store from './store.js';
 
-const FALLBACK = { sets: 3, reps: 10, startLoad: 20, increment: 2.5, rest: 90 };
-
-export const DEFAULTS = {
-  squat:        { sets: 3, reps: 5,  startLoad: 40, increment: 5,   rest: 180 },
-  bench:        { sets: 3, reps: 5,  startLoad: 30, increment: 2.5, rest: 180 },
-  skullcrusher: { sets: 3, reps: 10, startLoad: 15, increment: 2.5, rest: 90  },
-  pushdown:     { sets: 3, reps: 12, startLoad: 20, increment: 2.5, rest: 60  },
-};
-
-/** What the setup screen should prefill for a lift: its defaults, with the load carried
- *  forward from whatever progression last decided. */
+/** What the setup screen prefills: sets and reps from your goal, load carried forward from
+ *  whatever progression last decided, falling back to a bodyweight-scaled first guess. */
 export function suggest(exId) {
-  const d = { ...FALLBACK, ...(DEFAULTS[exId] ?? {}) };
-  return { ...d, load: store.getLoad(exId, d.startLoad) };
+  return {
+    ...planner.scheme(exId),
+    load: store.getLoad(exId, planner.startingLoad(exId)),
+    increment: planner.increment(exId),
+    rest: planner.restSeconds(exId),
+  };
 }
 
 const CUE_COOLDOWN_MS = 6000;      // same fault will not be repeated inside this window

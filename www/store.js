@@ -3,7 +3,7 @@
 
 const KEY = 'gym-trainer/v1';
 
-const blank = { loads: {}, thresholds: {}, log: [] };
+const blank = { loads: {}, thresholds: {}, log: [], profile: null };
 
 export function read() {
   try {
