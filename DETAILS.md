@@ -156,6 +156,41 @@ elbows flaring, 93% of your corrections here"), and the rest summary.
 
 ---
 
+## 6b. Eating
+
+Targets come out of the profile that already exists: protein is 1.8 g/kg of bodyweight (1.4 for
+endurance), fat is a 0.8 g/kg floor, calories are a per-kg figure scaled by how often you train and
+nudged by the goal, and carbs are whatever calories are left. A test asserts the four macros add
+back up to the calorie number, so a typo in one of them cannot pass.
+
+**No food API, no downloaded database, no language model.** The app has no network and no account;
+an API key baked into the APK is a key that stops working on gym wifi, and a made-up macro from a
+model is worse than a rough one you can see and correct. Instead there is a table of ~47 staples,
+each with macros **per serving** — "1 large egg", "100 g chicken breast", "1 cup dal" — which
+removes all unit arithmetic: a log entry is a food and a quantity. Anything missing you type once
+and it is yours for good, and your own entry overrides a table value you disagree with.
+
+Which meal something belongs to is read off the clock rather than asked for. Picking "lunch" from a
+dropdown after you already picked the food is a tap that tells the app what the timestamp said.
+
+### Correcting the target from the scale
+
+The calorie formula is a population average applied to one person, so it is a starting guess in
+exactly the way `startingLoad()` is. What corrects it is bodyweight over 28 days, and the
+correction is **offered, never applied** — a fortnight of water weight would otherwise walk the
+target somewhere silly.
+
+The suggestion is anchored to what you **ate**, not to the target you were given: eating 2,200 and
+staying flat means maintenance is 2,200, whatever the formula claimed. It stays quiet unless there
+are 10+ days between weigh-ins, 7+ days of food logged, and a correction bigger than scale noise —
+and it refuses outright when the average logged intake is under 75% of target, because that is a
+logging problem and "eat more" is the opposite of the right advice.
+
+That last case is also what the coach line leads with. Gaining weight on a large deficit means the
+log is incomplete, and every other reading is computed from a number that is simply wrong.
+
+---
+
 ## 7. Data
 
 One localStorage key, `gym-trainer/v1`:
@@ -164,19 +199,41 @@ One localStorage key, `gym-trainer/v1`:
 {
   loads:      { squat: 72.5, ... },        // current working weight per lift
   thresholds: { squat: { depthGap: 0.02 } }, // your calibration overrides
-  profile:    { bodyweight: 82, ... },
+  profile:    { bodyweight: 82, ... },     // + optional kcalTarget, accepted from the scale
   log: [{
     at: '2026-08-12T18:04:11.000Z',
     exId: 'squat', set: 2,
     reps: 5, target: 5, load: 70,
     faults: { depth: 1, torso: 3 },        // fault id → times fired
     repMs: [2140, 2260, 2380, 2900, 3400], // per-rep duration
-  }]
+  }],
+  meals:   [{ at: '...', foodId: 'whey', qty: 2 }],  // what you ate, not its macros
+  foods:   { 'my:chicken-curry': { name, serving, kcal, protein, carbs, fat } },
+  weights: [{ at: '...', kg: 82 }],        // one point per day, max 400
 }
 ```
 
-Capped at the most recent 500 sets. It is a plain object, so a backup is a copy-paste — though
-there is no export button yet, which is a real gap given it lives on exactly one device.
+Sets are capped at the most recent 500, meals at 3000 (about 18 months).
+
+**Profile → Backup** exports the whole object as JSON and restores it. Two ways out, because
+neither works everywhere: a blob download is the one you want, but a Capacitor WebView with no
+`DownloadListener` drops those silently, so clipboard sits next to it. Restore validates the shape
+before writing anything — a half-applied restore that wipes the log is worse than one that fails.
+
+### Why meals store an id, not macros
+
+A meal is `{ foodId, qty }`. Correcting a food's numbers therefore corrects every meal ever logged
+with it. That is right when you are fixing an *estimate of a fixed thing* — the chicken did not
+change, our number for it did — and wrong when the *thing itself* changed, like a new recipe.
+
+Nothing in the data distinguishes those two, so the app asks instead of guessing, and only at the
+one moment it matters: saving over a custom food you have already eaten shows how many entries it
+would rewrite and offers to keep the new version as a separate food. Table foods never reach this,
+because their values only change when a new version of the app ships — and that is always a
+correction, so retroactive is exactly what you want.
+
+The alternative, freezing macros into every log entry, buys immutable history at the price of
+making every typo permanent — and the common case genuinely is "I finally read the label".
 
 ---
 
@@ -186,9 +243,11 @@ there is no export button yet, which is a real gap given it lives on exactly one
 www/
   index.html      one page, all five screens, plain CSS design tokens
   app.js          wiring, HUD, frame loop, screen navigation
-  exercises.js    16 lifts, rule engine, rep state machine   ← pure, no DOM
+  exercises.js    28 lifts, rule engine, rep state machine   ← pure, no DOM
   planner.js      profile, splits, session building, loads   ← pure logic
   insights.js     log analytics                              ← pure functions
+  nutrition.js    macro targets, food table, the coach read  ← pure logic
+  technique.js    how to perform each lift (spoken brief)    ← data only
   coach.js        rep callouts, cue throttling, progression
   pose.js         camera + MediaPipe + skeleton drawing
   store.js        localStorage
@@ -196,8 +255,8 @@ www/
   vendor/         MediaPipe wasm + pose model + fonts (generated, not in git)
 ```
 
-The three modules doing the actual thinking — `exercises`, `planner`, `insights` — touch no DOM and
-no browser APIs, which is exactly why they can be tested in Node.
+The four modules doing the actual thinking — `exercises`, `planner`, `insights`, `nutrition` —
+touch no DOM and no browser APIs, which is exactly why they can be tested in Node.
 
 **No build step and no framework.** Native ES modules, plain CSS. `node serve.mjs` is 25 lines of
 `node:http`. The only runtime dependency is MediaPipe.
@@ -208,6 +267,15 @@ The visual language came from a Google Stitch export: neon green on near-black, 
 JetBrains Mono for anything you read as an instrument, 64px touch targets for sweaty hands. The
 export's Tailwind / Google Fonts / Material Symbols CDN links were all removed — each one would
 leave the APK blank with no signal.
+
+Training is red and eating is green, everywhere, without exception. The home screen is two cards
+side by side and the fastest thing on it should be telling which is which. Both accent colours are
+tokens (`--train`, `--eat`) rather than literals, so that stays true by construction.
+
+Lists are tiles rather than ruled rows, and the primary button on a screen glows in its own accent
+so the next thing to do is the brightest thing present. Half a phone width is not much, so anything
+inside the two-up cards is one line or it is wrong — a wrapped "2,830 kcal" reads as two numbers,
+and truncating it to "2,8…" is worse than either.
 
 ---
 
@@ -230,21 +298,28 @@ Latest build: https://github.com/GreyL11/GYM-PT-AI/releases/latest (~15 MB)
 
 ## 10. Tests
 
-53 checks across four suites, run in CI before every APK.
+80 checks across five suites, run in CI before every APK.
 
 | Suite | Covers |
 |---|---|
-| `test_exercises.mjs` (24) | Angle maths, rep counting in both directions, jitter rejection, every fault rule, view gating, visibility gating, calibration |
+| `test_exercises.mjs` (30) | Angle maths, rep counting in both directions, jitter rejection, every fault rule, view gating, visibility gating, calibration, a how-to brief for every lift |
 | `test_planner.mjs` (11) | Weekday mapping, equipment and injury filtering, rep schemes, load scaling, no duplicate lifts per session |
 | `test_insights.mjs` (9) | 1RM edges, session grouping, stall detection, deload maths, fingerprint shares, volume windows, fatigue |
 | `test_coach.mjs` (9) | Warm-up ramps, preview-then-commit progression, rep correction, bodyweight rep progression, deload |
+| `test_nutrition.mjs` (21) | Macro arithmetic, food table consistency, the day's log, meal slots, weight trend, target correction and its refusals, backup round-trip |
 
 Fed by synthetic landmark frames built to exact joint angles — so the rules are tested against
 geometry, not recordings.
 
-**This caught a real bug:** textbook Epley (`1 + reps/30`) reports a 1-rep max as 3% *above* the
-weight you just lifted. The assertion that a single should equal itself failed, and every number on
-the Progress screen would otherwise have been quietly inflated.
+**These caught real bugs:**
+
+- Textbook Epley (`1 + reps/30`) reports a 1-rep max as 3% *above* the weight you just lifted. The
+  assertion that a single should equal itself failed, and every number on the Progress screen would
+  otherwise have been quietly inflated.
+- The food table's "macros must explain the calories" check failed on beer. Alcohol is a fourth
+  energy source at 7 kcal/g that the four macros cannot express, so drinks now declare it.
+- The calorie correction originally added its delta to the *target* rather than to what was
+  actually eaten, which told someone eating 2,200 and holding steady to eat 3,125 instead of 2,420.
 
 ---
 

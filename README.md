@@ -6,9 +6,11 @@ network needed once installed.
 
 ## Get the APK
 
-Push to `main` (or run the **Build APK** workflow manually). GitHub Actions builds it and attaches
-`trainer-apk` as an artifact on the run — download, unzip, sideload. You will need "Install unknown
-apps" enabled for whatever app you open it with.
+On the phone, open [releases/latest](https://github.com/GreyL11/GYM-PT-AI/releases/latest) and tap
+`trainer.apk`. Chrome warns about the file type — download anyway, tap it, and allow installs from
+Chrome when Android asks.
+
+Every push to `main` (or a manual run of the **Build APK** workflow) publishes a new release.
 
 It is an unsigned debug build. That is fine for your own phone; it is not Play Store material.
 
@@ -28,11 +30,39 @@ normal Android permission.
 ## Using it
 
 Prop the phone side-on, 2–3 m away, whole body in frame. Each lift shows its own camera hint on the
-start screen. Hit **Start session**; it counts reps out loud and calls out faults as they happen.
+start screen, and **How to** spells out the movement — setup, execution and the usual ways it goes
+wrong. The first time you ever do a lift it opens and reads itself out, because being corrected
+mid-rep is a poor way to learn a movement and a worse way to learn it under load. Hit **Start session**; it counts reps out loud and calls out faults as they happen.
 **End set** when you rack it. The screen is held awake while a set is running.
 
 Progression is linear and gated on form: hit every rep with few corrections and the load goes up
 next session; miss reps or break down and it holds.
+
+## Eat
+
+Protein and calorie targets come from the profile you already filled in — bodyweight, goal, days
+per week. Tap **Eat**, tap what you ate. Half and double servings are one tap; anything not in the
+table you type once and it is yours for good. Your most-eaten foods collect under **Usual**, which
+is what makes it two taps a meal by the second week.
+
+There is no food API, no downloaded database and no language model. The app has no network and no
+account, and a nutrition API would need a key baked into the APK that stops working on gym wifi.
+The table covers the staples; you cover the rest, once.
+
+The targets are a starting guess in exactly the way starting loads are. What corrects them is the
+**Coach** card: bodyweight against calories over 28 days. Log your weight (it is the same field in
+your profile that scales your lifts) and it will tell you when the two numbers disagree — including
+when the honest answer is "you are eating more than you are logging".
+
+## Back it up
+
+Everything lives in one localStorage key on one phone. No account, no cloud, nothing to recover
+from — lose the phone and a year of training goes with it. **Profile → Backup** writes the lot out
+as JSON: save the file, or copy it and paste it somewhere you trust. The same screen restores it.
+
+The file download is the one you want, but a Capacitor WebView with no `DownloadListener` drops
+blob downloads silently, so **Copy** is there as the path that works everywhere. If nothing lands
+in your downloads, use it.
 
 ## Adjust — read this before deciding it's wrong
 
@@ -56,9 +86,9 @@ because it genuinely is not visible from there.
 npm test
 ```
 
-Covers the joint-angle maths, the rep state machine and every fault rule against synthetic frames.
-`www/exercises.js` is pure — no DOM, no MediaPipe — specifically so this stays runnable. CI runs it
-before building the APK.
+Covers the joint-angle maths, the rep state machine and every fault rule against synthetic frames,
+plus the macro arithmetic and the food log. `www/exercises.js` and `www/nutrition.js` are pure — no
+DOM, no MediaPipe — specifically so this stays runnable. CI runs it before building the APK.
 
 ## Layout
 
@@ -66,9 +96,11 @@ before building the APK.
 |---|---|
 | `www/exercises.js` | Rep state machine and fault rules. Pure functions, all the real logic |
 | `www/coach.js` | Session plan, rep callouts, cue throttling, linear progression |
+| `www/nutrition.js` | Macro targets, the food table, the day's log, the 28-day coach read |
+| `www/technique.js` | How to perform each lift — the spoken brief and the "How to" panel |
 | `www/pose.js` | Camera and MediaPipe Pose Landmarker; skeleton drawing |
 | `www/app.js` | Wiring, HUD, settings sliders, wake lock |
-| `www/store.js` | localStorage: loads, thresholds, set log |
+| `www/store.js` | localStorage: loads, thresholds, set log, meals, bodyweight |
 | `www/vendor/` | MediaPipe wasm + pose model. Generated, gitignored |
 | `android/` | Capacitor shell. Regenerate with `npx cap add android` |
 | `vendor.mjs` | Rebuilds `www/vendor/` |
