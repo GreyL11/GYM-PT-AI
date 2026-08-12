@@ -5,6 +5,28 @@ import { join } from 'node:path';
 
 const SRC = 'node_modules/@mediapipe/tasks-vision';
 const OUT = join(import.meta.dirname, 'www', 'vendor');
+
+/**
+ * fetch, but it does not give up the first time a network hiccups.
+ *
+ * Everything below is downloaded from Google over the public internet, from a CI runner, and a
+ * single dropped connection here fails the whole build and ships no APK. That is a silly reason
+ * not to have a release. Three tries with a widening gap costs nothing when the network is fine.
+ */
+async function get(url, init, tries = 3) {
+  for (let i = 1; ; i += 1) {
+    try {
+      const res = await fetch(url, init);
+      if (res.ok) return res;
+      // 4xx will not fix itself; only retry the ones that might.
+      if (res.status < 500 || i === tries) throw new Error(`${res.status} ${res.statusText}`);
+    } catch (err) {
+      if (i === tries) throw new Error(`${url} failed after ${tries} tries: ${err.message}`);
+      console.log(`vendor: ${url} — ${err.message}, retrying (${i}/${tries - 1})`);
+    }
+    await new Promise((r) => setTimeout(r, i * 2000));
+  }
+}
 const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task';
 
 // Google Fonts serves woff2 only to browser user agents; node's default UA gets ttf.
@@ -19,8 +41,7 @@ const model = join(OUT, 'pose_landmarker_lite.task');
 if (existsSync(model)) {
   console.log('vendor: wasm + bundle refreshed, model already present');
 } else {
-  const res = await fetch(MODEL_URL);
-  if (!res.ok) throw new Error(`model download failed: ${res.status} ${res.statusText}`);
+  const res = await get(MODEL_URL);
   writeFileSync(model, Buffer.from(await res.arrayBuffer()));
   console.log('vendor: wasm + bundle refreshed, model downloaded');
 }
@@ -31,7 +52,7 @@ if (existsSync(model)) {
 const fontDir = join(OUT, 'fonts');
 mkdirSync(fontDir, { recursive: true });
 
-const css = await (await fetch(FONT_CSS, { headers: { 'User-Agent': CHROME_UA } })).text();
+const css = await (await get(FONT_CSS, { headers: { 'User-Agent': CHROME_UA } })).text();
 const blocks = [...css.matchAll(/\/\*\s*latin\s*\*\/\s*@font-face\s*\{([^}]+)\}/g)].map((m) => m[1]);
 if (!blocks.length) throw new Error('no latin @font-face blocks found — did the Google Fonts CSS format change?');
 
@@ -51,8 +72,7 @@ for (const block of blocks) {
 const rules = [];
 for (const [url, { family, weights }] of byUrl) {
   const file = `${family.replace(/\s+/g, '')}.woff2`;
-  const res = await fetch(url, { headers: { 'User-Agent': CHROME_UA } });
-  if (!res.ok) throw new Error(`font download failed: ${file} ${res.status}`);
+  const res = await get(url, { headers: { 'User-Agent': CHROME_UA } });
   writeFileSync(join(fontDir, file), Buffer.from(await res.arrayBuffer()));
   const lo = Math.min(...weights), hi = Math.max(...weights);
   rules.push(`@font-face{font-family:'${family}';font-style:normal;`
