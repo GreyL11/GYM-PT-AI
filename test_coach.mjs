@@ -1,0 +1,158 @@
+// Self-check for the coaching layer: warm-up ramps, progression, rep correction.
+// Run: node test_coach.mjs   (localStorage shim + dynamic import, as in the other suites)
+
+import assert from 'node:assert/strict';
+
+const mem = new Map();
+globalThis.localStorage = {
+  getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+  setItem: (k, v) => mem.set(k, String(v)),
+  removeItem: (k) => mem.delete(k),
+  clear: () => mem.clear(),
+};
+
+const { createCoach, warmupsFor } = await import('./www/coach.js');
+const store = await import('./www/store.js');
+
+const said = [];
+const newCoach = () => { said.length = 0; return createCoach({ speak: (t) => said.push(t) }); };
+const reset = () => mem.clear();
+/** A finished set, as exercises.js would leave it. */
+const setDone = (reps, faults = {}) => ({ reps, faultCounts: faults, repMs: [] });
+
+const ok = [];
+const check = (name, fn) => { reset(); fn(); ok.push(name); };
+
+check('warm-ups apply to heavy compounds only', () => {
+  assert.equal(warmupsFor('curl', 60).length, 0, 'isolation needs no ramp');
+  assert.equal(warmupsFor('squat', 20).length, 0, 'an empty bar is already the warm-up');
+  assert.equal(warmupsFor('squat', 100, false).length, 0, 'and the lifter can switch them off');
+
+  const w = warmupsFor('squat', 100);
+  assert.equal(w.length, 2);
+  assert.deepEqual(w[0], { load: 50, reps: 5 }, 'half the working weight');
+  assert.deepEqual(w[1], { load: 75, reps: 3 }, 'then three-quarters');
+  assert.equal(warmupsFor('squat', 47.5)[0].load % 2.5, 0, 'ramps land on loadable plates');
+});
+
+check('warm-up sets are announced, not logged, and do not touch progression', () => {
+  const coach = newCoach();
+  coach.select('squat', { sets: 2, reps: 5, load: 100 });
+
+  assert.equal(coach.state.warmup, true);
+  assert.equal(coach.state.label, 'Warm-up 1/2');
+  assert.equal(coach.state.load, 50, 'first ramp is 50%');
+
+  let r = coach.endSet(setDone(5));
+  assert.equal(r.warmup, true);
+  assert.equal(r.done, false);
+  assert.equal(coach.state.load, 75, 'second ramp is 75%');
+
+  r = coach.endSet(setDone(3));
+  assert.equal(coach.state.warmup, false, 'ramps finished');
+  assert.equal(coach.state.label, 'Set 1/2');
+  assert.equal(coach.state.load, 100, 'working weight now');
+  assert.equal(store.read().log.length, 0, 'nothing logged from warm-ups');
+
+  coach.endSet(setDone(5));
+  r = coach.endSet(setDone(5));
+  assert.equal(r.done, true, 'two working sets completes the lift');
+  assert.equal(store.read().log.length, 2, 'only the working sets are logged');
+});
+
+check('progression previews but does not apply until the lift is finished', () => {
+  const coach = newCoach();
+  coach.select('squat', { sets: 1, reps: 5, load: 100, warmup: false });
+  const r = coach.endSet(setDone(5));
+
+  assert.equal(r.verdict.to, 105, 'clean set previews +5');
+  assert.equal(store.getLoad('squat', 0), 100, 'but the stored load has NOT moved yet');
+
+  coach.finishExercise();
+  assert.equal(store.getLoad('squat', 0), 105, 'committing applies it');
+});
+
+check('correcting a miscount changes the log and the verdict', () => {
+  const coach = newCoach();
+  coach.select('bench', { sets: 1, reps: 5, load: 60, warmup: false });
+  // The camera saw 4; the lifter actually did 5.
+  const r = coach.endSet(setDone(4));
+  assert.equal(r.verdict.moved, false, 'a missed rep holds the weight');
+
+  const amended = coach.amendReps(1);
+  assert.equal(amended.reps, 5);
+  assert.equal(amended.verdict.moved, true, 'now it is a clean set');
+  assert.equal(amended.verdict.to, 62.5);
+  assert.equal(store.read().log.at(-1).reps, 5, 'the logged set was corrected too');
+
+  coach.finishExercise();
+  assert.equal(store.getLoad('bench', 0), 62.5);
+});
+
+check('correction cannot drive reps below zero', () => {
+  const coach = newCoach();
+  coach.select('bench', { sets: 1, reps: 5, load: 60, warmup: false });
+  coach.endSet(setDone(1));
+  coach.amendReps(-1);
+  const a = coach.amendReps(-1);
+  assert.equal(a.reps, 0);
+});
+
+check('bodyweight lifts progress on reps, since there is no weight to add', () => {
+  const coach = newCoach();
+  coach.select('pushup', { sets: 2, reps: 10, load: 0 });
+  assert.equal(coach.state.warmup, false, 'no ramp for a bodyweight lift');
+
+  coach.endSet(setDone(10));
+  const r = coach.endSet(setDone(10));
+  assert.equal(r.verdict.reps, true, 'the verdict is about reps, not kilos');
+  assert.equal(r.verdict.from, 10);
+  assert.equal(r.verdict.to, 11);
+
+  coach.finishExercise();
+  assert.equal(store.getReps('pushup', 0), 11, 'next session asks for one more');
+  assert.equal(store.getLoad('pushup', 0), 0, 'and the weight stays at bodyweight');
+});
+
+check('a messy set holds the weight even when every rep was hit', () => {
+  const coach = newCoach();
+  coach.select('squat', { sets: 1, reps: 5, load: 100, warmup: false });
+  const r = coach.endSet(setDone(5, { depth: 3, torso: 2 }));
+  assert.equal(r.verdict.moved, false);
+  assert.equal(r.verdict.reason, 'form broke down');
+  coach.finishExercise();
+  assert.equal(store.getLoad('squat', 0), 100);
+});
+
+check('three sessions stuck triggers the deload through the coach', () => {
+  const at = (d) => new Date(Date.now() - d * 86400000).toISOString();
+  mem.set('gym-trainer/v1', JSON.stringify({
+    loads: { bench: 70 }, thresholds: {}, reps: {}, profile: null,
+    log: [
+      { at: at(14), exId: 'bench', reps: 3, target: 5, load: 70, faults: {} },
+      { at: at(7), exId: 'bench', reps: 3, target: 5, load: 70, faults: {} },
+    ],
+  }));
+  const coach = newCoach();
+  coach.select('bench', { sets: 1, reps: 5, load: 70, warmup: false });
+  const r = coach.endSet(setDone(3));
+  assert.equal(r.verdict.deload, true, 'third stuck session');
+  assert.equal(r.verdict.to, 62.5, '10% off, rounded');
+  coach.finishExercise();
+  assert.equal(store.getLoad('bench', 0), 62.5);
+});
+
+check('the coach says the weight out loud, and says bodyweight when there is none', () => {
+  const coach = newCoach();
+  coach.select('squat', { sets: 1, reps: 5, load: 100, warmup: false });
+  coach.announceSet();
+  assert.match(said.at(-1), /100 kilos/);
+
+  const c2 = newCoach();
+  c2.select('pushup', { sets: 1, reps: 10, load: 0 });
+  c2.announceSet();
+  assert.match(said.at(-1), /bodyweight/);
+});
+
+console.log(ok.map((n) => `  ok  ${n}`).join('\n'));
+console.log(`\n${ok.length} checks passed`);

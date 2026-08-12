@@ -458,6 +458,49 @@ export const EXERCISES = {
   },
 };
 
+// ── calibration ──────────────────────────────────────────────────────────────────────────
+
+const percentile = (sorted, p) => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
+
+/** Below this the lifter clearly wasn't repping — refuse rather than save nonsense. */
+export const MIN_RANGE_DEG = 25;
+
+/**
+ * Turn a recording of someone lifting into thresholds for that person.
+ *
+ * Only ANATOMY is calibrated: where your rep actually starts and ends, what your lockout looks
+ * like, how deep your bottom position is. Technique tolerances — elbow flare, torso lean, upper-arm
+ * drift — are deliberately NOT learned, because calibrating those from your own reps would bake
+ * whatever you currently do wrong in as the new definition of correct.
+ *
+ * @param {Array} samples  the `m` object from step(), one per frame
+ * @returns {object|null}  a thresholds patch, or null if there wasn't enough movement to learn from
+ */
+export function calibrate(exId, samples) {
+  const ex = EXERCISES[exId];
+  const primary = samples.map((s) => s.primary).filter(Number.isFinite).sort((a, b) => a - b);
+  if (primary.length < 30) return null;
+
+  // Percentiles, not min/max: a single bad frame should not define your range of motion.
+  const lo = percentile(primary, 0.05);
+  const hi = percentile(primary, 0.95);
+  if (hi - lo < MIN_RANGE_DEG) return null;
+
+  const MARGIN = 5; // sit just inside the observed extremes so the endpoints reliably trigger
+  const towardsHigh = ex.rep.end > ex.rep.start;
+  const patch = {
+    repStart: Math.round(towardsHigh ? lo + MARGIN : hi - MARGIN),
+    repEnd: Math.round(towardsHigh ? hi - MARGIN : lo + MARGIN),
+  };
+
+  // The extended position, whichever end of the arc it sits at for this lift.
+  if ('lockout' in ex.thresholds) patch.lockout = Math.min(180, Math.round(hi - MARGIN));
+  // The bottom position: "you stopped short" should mean short of YOUR bottom.
+  if ('depth' in ex.thresholds) patch.depth = Math.max(10, Math.round(lo + MARGIN));
+
+  return patch;
+}
+
 // ── planning metadata ────────────────────────────────────────────────────────────────────
 // Kept in one table rather than sprinkled through the definitions above, because it belongs to
 // the planner, not the form rules — those two never need to change together.
@@ -608,5 +651,16 @@ export function step(exId, frame, st, T) {
     }
   }
 
-  return { visible: true, angle: a, phase: st.phase, reps: st.reps, repCompleted, faults, side };
+  // Raw readings for calibration, which needs to learn what YOUR angles are rather than
+  // whether they tripped a textbook threshold.
+  const m = {
+    primary: a,
+    torsoLean: torsoLean(W.hip, W.shoulder),
+    shoulder: JOINTS.shoulder(),
+    elbow: JOINTS.elbow(),
+    knee: JOINTS.knee(),
+    hip: JOINTS.hip(),
+  };
+
+  return { visible: true, angle: a, phase: st.phase, reps: st.reps, repCompleted, faults, side, m };
 }

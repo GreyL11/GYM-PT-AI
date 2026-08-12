@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node test_exercises.mjs && node test_planner.mjs && node test_insights.mjs",
+    "test": "node test_exercises.mjs && node test_planner.mjs && node test_insights.mjs && node test_coach.mjs",
     "serve": "node serve.mjs",
     "vendor": "node vendor.mjs"
   },

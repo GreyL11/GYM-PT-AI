@@ -1,8 +1,5 @@
-// The PT layer: rep callouts, cue throttling, and deciding next session's load.
+// The PT layer: rep callouts, cue throttling, warm-ups, and deciding next session's load.
 // Deliberately rules, not a model — progression is arithmetic and a coach's voice is a lookup.
-//
-// You pick the lift and the numbers; this just holds you to them. DEFAULTS only prefills the
-// setup screen, so an exercise with no entry still works on FALLBACK.
 
 import { EXERCISES, defaultThresholds } from './exercises.js';
 import * as insights from './insights.js';
@@ -12,8 +9,11 @@ import * as store from './store.js';
 /** What the setup screen prefills: sets and reps from your goal, load carried forward from
  *  whatever progression last decided, falling back to a bodyweight-scaled first guess. */
 export function suggest(exId) {
+  const s = planner.scheme(exId);
   return {
-    ...planner.scheme(exId),
+    sets: s.sets,
+    // Bodyweight lifts progress by reps, so their target is stored rather than fixed by goal.
+    reps: store.getReps(exId, s.reps),
     load: store.getLoad(exId, planner.startingLoad(exId)),
     increment: planner.increment(exId),
     rest: planner.restSeconds(exId),
@@ -23,13 +23,23 @@ export function suggest(exId) {
 const CUE_COOLDOWN_MS = 6000;      // same fault will not be repeated inside this window
 const SPEECH_GAP_MS = 1200;        // never talk over yourself
 const CLEAN_FAULTS_PER_REP = 0.34; // above this, the set was not clean enough to add weight
+const WARMUP_MIN_LOAD = 40;        // below this the working weight IS the warm-up
+const WARMUP_REST = 60;
+
+/** Ramp to the working weight on heavy compounds. Percentages of the working set. */
+export function warmupsFor(exId, load, wanted = true) {
+  if (!wanted || !EXERCISES[exId].compound || load < WARMUP_MIN_LOAD) return [];
+  const at = (pct) => Math.max(20, Math.round((load * pct) / 2.5) * 2.5);
+  return [{ load: at(0.5), reps: 5 }, { load: at(0.75), reps: 3 }];
+}
 
 export function createCoach({ speak }) {
-  let current = null;     // { exId, sets, reps, load, increment, rest }
-  let setIdx = 0;
+  let current = null;     // { exId, sets, reps, load, increment, rest, bodyweight }
+  let warmups = [];
+  let idx = 0;            // position across warm-ups then working sets
   let lastSpoke = 0;
   const cueAt = new Map();
-  let exerciseSets = [];  // sets completed so far on the current exercise
+  let exerciseSets = [];  // working sets completed so far, feeds progression
 
   function say(text, { throttleKey, force = false } = {}) {
     const now = Date.now();
@@ -43,9 +53,11 @@ export function createCoach({ speak }) {
     return true;
   }
 
+  const isWarmup = () => idx < warmups.length;
+
   return {
     /** Start a lift with the numbers the lifter chose. */
-    select(exId, { sets, reps, load } = {}) {
+    select(exId, { sets, reps, load, warmup = true } = {}) {
       const d = suggest(exId);
       current = {
         exId,
@@ -54,26 +66,33 @@ export function createCoach({ speak }) {
         load: load ?? d.load,
         increment: d.increment,
         rest: d.rest,
+        bodyweight: (load ?? d.load) === 0,
       };
-      setIdx = 0;
+      warmups = warmupsFor(exId, current.load, warmup);
+      idx = 0;
       exerciseSets = [];
-      // Remember the chosen load so the next visit prefills it, even without a progression bump.
-      store.setLoad(exId, current.load);
+      if (!current.bodyweight) store.setLoad(exId, current.load);
+      else store.setReps(exId, current.reps);
       return this.state;
     },
 
     get state() {
       if (!current) return { idle: true };
+      const w = warmups.length;
+      const warm = isWarmup();
+      const n = warm ? idx + 1 : idx - w + 1;
       return {
         idle: false,
         exId: current.exId,
         name: EXERCISES[current.exId].name,
         hint: EXERCISES[current.exId].cameraHint,
-        set: setIdx + 1,
-        sets: current.sets,
-        targetReps: current.reps,
-        load: current.load,
-        rest: current.rest,
+        warmup: warm,
+        set: n,
+        sets: warm ? w : current.sets,
+        label: warm ? `Warm-up ${n}/${w}` : `Set ${n}/${current.sets}`,
+        targetReps: warm ? warmups[idx].reps : current.reps,
+        load: warm ? warmups[idx].load : current.load,
+        rest: warm ? WARMUP_REST : current.rest,
         thresholds: store.getThresholds(current.exId, defaultThresholds(current.exId)),
       };
     },
@@ -81,7 +100,10 @@ export function createCoach({ speak }) {
     announceSet() {
       const s = this.state;
       if (s.idle) return;
-      say(`${s.name}. Set ${s.set} of ${s.sets}. ${s.targetReps} reps at ${s.load} kilos.`, { force: true });
+      const weight = s.load ? `${s.load} kilos` : 'bodyweight';
+      say(s.warmup
+        ? `${s.name}. Warm-up ${s.set} of ${s.sets}. ${s.targetReps} reps at ${weight}.`
+        : `${s.name}. Set ${s.set} of ${s.sets}. ${s.targetReps} reps at ${weight}.`, { force: true });
     },
 
     /** Feed every analysed frame through here. Returns the cue it decided to speak, if any. */
@@ -91,7 +113,7 @@ export function createCoach({ speak }) {
         return null;
       }
       if (result.repCompleted) {
-        const left = current.reps - result.reps;
+        const left = this.state.targetReps - result.reps;
         say(left > 0 ? String(result.reps) : 'Last one done.', { force: true });
       }
       // One correction at a time. Stacking cues mid-rep is noise, not coaching.
@@ -100,18 +122,31 @@ export function createCoach({ speak }) {
       return null;
     },
 
-    /** Called when the lifter racks it. `st` is the exercises.js state for the set just done. */
+    /**
+     * Called when the lifter racks it. Warm-ups are not logged and never affect progression.
+     * The progression verdict is only a PREVIEW here — nothing is written until finishExercise(),
+     * so a miscounted rep can still be corrected on the rest screen.
+     */
     endSet(st) {
+      const s = this.state;
       const faults = Object.values(st.faultCounts).reduce((a, b) => a + b, 0);
+      const slowdown = insights.fatigue(st.repMs);
+
+      if (s.warmup) {
+        idx += 1;
+        say(`Warm-up done. ${this.state.warmup ? 'One more' : 'Working weight next'}.`, { force: true });
+        return { done: false, warmup: true, rest: WARMUP_REST, record: { reps: st.reps }, faults: 0, slowdown };
+      }
+
       const record = {
         at: new Date().toISOString(),
         exId: current.exId,
-        set: setIdx + 1,
+        set: s.set,
         reps: st.reps,
         target: current.reps,
         load: current.load,
         faults: { ...st.faultCounts },
-        repMs: st.repMs.map(Math.round),
+        repMs: (st.repMs ?? []).map(Math.round),
       };
       store.appendLog(record);
       exerciseSets.push(record);
@@ -120,46 +155,69 @@ export function createCoach({ speak }) {
       say(hit ? `Set done. ${st.reps} reps. Rest ${current.rest} seconds.`
               : `Set done. ${st.reps} of ${current.reps}. Rest ${current.rest} seconds.`, { force: true });
 
-      const slowdown = insights.fatigue(st.repMs);
-
-      setIdx += 1;
-      if (setIdx < current.sets) return { done: false, rest: current.rest, record, faults, slowdown };
-
-      const verdict = this.progress(exerciseSets);
-      return { done: true, rest: current.rest, record, faults, slowdown, verdict };
+      idx += 1;
+      const done = idx >= warmups.length + current.sets;
+      return { done, rest: current.rest, record, faults, slowdown, verdict: done ? this.preview() : null };
     },
 
-    /** Linear progression, gated on form. Missing reps OR a messy set holds the load. */
-    progress(sets) {
-      const { exId, load, increment } = current;
-      const allReps = sets.every((s) => s.reps >= s.target);
-      const totalReps = sets.reduce((a, s) => a + s.reps, 0);
-      const totalFaults = sets.reduce((a, s) => a + Object.values(s.faults).reduce((x, y) => x + y, 0), 0);
+    /** Fix a miscount before it poisons the log, progression and the analytics. */
+    amendReps(delta) {
+      const last = exerciseSets.at(-1);
+      if (!last) return null;
+      last.reps = Math.max(0, last.reps + delta);
+      store.amendLastSet({ reps: last.reps });
+      return { reps: last.reps, verdict: this.preview() };
+    },
+
+    /** What progression WOULD do. Pure: no storage writes, no speech. */
+    preview() {
+      if (!current || !exerciseSets.length) return null;
+      const { exId, load, increment, reps, bodyweight } = current;
+      const allReps = exerciseSets.every((s) => s.reps >= s.target);
+      const totalReps = exerciseSets.reduce((a, s) => a + s.reps, 0);
+      const totalFaults = exerciseSets.reduce(
+        (a, s) => a + Object.values(s.faults).reduce((x, y) => x + y, 0), 0,
+      );
       const rate = totalReps ? totalFaults / totalReps : 0;
 
       if (allReps && rate < CLEAN_FAULTS_PER_REP) {
-        const next = load + increment;
-        store.setLoad(exId, next);
-        say(`All reps, clean. Next time ${next} kilos.`, { force: true });
-        return { moved: true, from: load, to: next, reason: 'all reps clean' };
+        // Nothing to add weight to on a push-up, so the rep target goes up instead.
+        return bodyweight
+          ? { moved: true, reps: true, from: reps, to: reps + 1, reason: 'all reps clean' }
+          : { moved: true, from: load, to: load + increment, reason: 'all reps clean' };
       }
-      // Three sessions stuck at the same weight is a stall, not a bad day. Back off and rebuild
-      // rather than grinding the same failed weight indefinitely.
-      if (insights.shouldDeload(exId)) {
-        const next = insights.deloadTo(load);
-        store.setLoad(exId, next);
-        say(`Stuck here three sessions. Dropping to ${next} kilos to rebuild.`, { force: true });
-        return { moved: true, deload: true, from: load, to: next, reason: 'stalled three sessions' };
+      if (!bodyweight && insights.shouldDeload(exId)) {
+        return { moved: true, deload: true, from: load, to: insights.deloadTo(load), reason: 'stalled three sessions' };
       }
+      return {
+        moved: false, reps: bodyweight, from: bodyweight ? reps : load, to: bodyweight ? reps : load,
+        reason: !allReps ? 'reps missed' : 'form broke down',
+      };
+    },
 
-      say(`Staying at ${load} kilos next time. ${!allReps ? 'You missed reps.' : 'Form broke down.'}`, { force: true });
-      return { moved: false, from: load, to: load, reason: !allReps ? 'reps missed' : 'form broke down' };
+    /** Apply the verdict. Called when the lifter leaves the rest screen, after any correction. */
+    finishExercise() {
+      const v = this.preview();
+      if (!v) return null;
+      const unit = v.reps ? 'reps' : 'kilos';
+      if (v.moved) {
+        if (v.reps) store.setReps(current.exId, v.to);
+        else store.setLoad(current.exId, v.to);
+        say(v.deload
+          ? `Stuck here three sessions. Dropping to ${v.to} kilos to rebuild.`
+          : `All reps, clean. Next time ${v.to} ${unit}.`, { force: true });
+      } else {
+        say(`Staying at ${v.to} ${unit} next time. ${v.reason === 'reps missed' ? 'You missed reps.' : 'Form broke down.'}`,
+          { force: true });
+      }
+      return v;
     },
 
     /** Back to the picker without finishing the lift — no progression verdict. */
     clear() {
       current = null;
-      setIdx = 0;
+      warmups = [];
+      idx = 0;
       exerciseSets = [];
     },
   };

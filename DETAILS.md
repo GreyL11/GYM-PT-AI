@@ -82,6 +82,20 @@ form you know is fine, loosen it. If it stays quiet through an ugly rep, tighten
 The rep endpoints themselves are thresholds too, not constants — your range of motion is the most
 personal number in the system.
 
+### Calibration
+
+Rather than making you find those numbers with sliders, **Calibrate** records 15 seconds of you
+lifting and derives them. It takes the 5th and 95th percentile of your actual range — percentiles,
+not min/max, so one bad frame can't define your squat — and writes your rep endpoints, your
+lockout, and your bottom position.
+
+It calibrates **anatomy only**. Elbow flare, torso lean and upper-arm drift are deliberately left
+alone, because learning those from your own reps would bake whatever you currently do wrong in as
+the new definition of correct.
+
+This matters more than it sounds. In testing, a lifter whose squat bottoms out at 120° — short of
+the 95° default — had **every rep go uncounted**. After calibration the same reps counted.
+
 ---
 
 ## 5. What it knows about you
@@ -216,13 +230,14 @@ Latest build: https://github.com/GreyL11/GYM-PT-AI/releases/latest (~15 MB)
 
 ## 10. Tests
 
-40 checks across three suites, run in CI before every APK.
+53 checks across four suites, run in CI before every APK.
 
 | Suite | Covers |
 |---|---|
-| `test_exercises.mjs` (20) | Angle maths, rep counting in both directions, jitter rejection, every fault rule, view gating, visibility gating |
+| `test_exercises.mjs` (24) | Angle maths, rep counting in both directions, jitter rejection, every fault rule, view gating, visibility gating, calibration |
 | `test_planner.mjs` (11) | Weekday mapping, equipment and injury filtering, rep schemes, load scaling, no duplicate lifts per session |
 | `test_insights.mjs` (9) | 1RM edges, session grouping, stall detection, deload maths, fingerprint shares, volume windows, fatigue |
+| `test_coach.mjs` (9) | Warm-up ramps, preview-then-commit progression, rep correction, bodyweight rep progression, deload |
 
 Fed by synthetic landmark frames built to exact joint angles — so the rules are tested against
 geometry, not recordings.
@@ -235,26 +250,23 @@ the Progress screen would otherwise have been quietly inflated.
 
 ## 11. Honest limits
 
-- **It has never been tested on a real body in a real gym.** Every threshold is a textbook starting
-  value. Expect the first session to be calibration, not training.
+- **It has never been tested on a real body in a real gym.** Calibration removes most of the
+  guesswork, but nothing here has faced a real barbell yet.
 - **Spinal rounding is invisible.** No camera system reads it reliably through a shirt.
 - **Bench is the weakest of the lifts.** A phone at 45° gets elbow flare and lockout well; bar
   path and touch point only roughly.
-- **Bodyweight lifts can't progress.** Push-ups and dips have no weight to add, and rep progression
-  isn't implemented yet, so they sit at the same prescription forever.
-- **No warm-up sets.** It sends you straight into working weight.
-- **A miscount is permanent.** No way to correct the rep count, and a wrong log feeds both
-  progression and the analytics.
-- **The counting starts the instant you tap Start** — including while you walk to the bar.
+- **Calibration trusts your reps.** It assumes the 15 seconds you record are your best form. Bad
+  reps in, wrong range out — though only your range of motion, never your fault tolerances.
 - **One device, no backup.** Clearing site data erases your history.
 - **Unsigned debug APK.** Fine for your own phone; Play Protect will warn you.
 
 ## 12. Next
 
-In progress: calibration mode (learn your joint angles from three reps instead of using textbook
-numbers), auto-start with a framing check, haptic feedback for when the gym is too loud to hear
-cues, bodyweight rep progression, warm-up ramps, and rep-count correction.
-
 Considered and not built: saving a 3-second clip of your worst rep, a plate calculator, data
-export, and an LLM check-in ("slept badly, shoulder is tweaky") — the last of which would need a
-proxy server for the API key and would end the app's offline guarantee.
+export/import, an in-app update check, and an LLM check-in ("slept badly, shoulder is tweaky") —
+the last of which would need a proxy server for the API key and would end the app's offline
+guarantee.
+
+In-set fatigue is measured and reported but not acted on: it tells you the set slowed down, it
+won't cut a set short. Stopping someone mid-lift on a heuristic is a decision worth making
+deliberately rather than defaulting into.

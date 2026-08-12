@@ -234,6 +234,21 @@
   #restbar { width: 200px; height: 12px; background: #262626; border-radius: 999px; overflow: hidden; }
   #restfill { height: 100%; width: 100%; background: var(--neon); transition: width 1s linear; }
 
+  /* framing / calibration overlay — centred, never over the lifter's body region */
+  #bigmsg {
+    margin: 0 var(--margin); padding: 20px; text-align: center;
+    background: #131313d9; border: 1px solid var(--outline-variant); border-radius: 2px;
+    backdrop-filter: blur(6px);
+  }
+  #bigmsg[hidden] { display: none; }
+  #bigmsg-title { color: var(--neon); }
+  #bigmsg-sub { margin-top: 10px; color: var(--on-surface-variant); }
+
+  /* rep correction on the rest screen */
+  #repfix { display: flex; align-items: center; justify-content: center; gap: 20px; }
+  #repfix button { width: 72px; min-height: 72px; padding: 0; font: 700 30px/1 var(--mono); color: var(--neon); }
+  #rest-reps { font: 900 44px/1 var(--mono); font-variant-numeric: tabular-nums; }
+
   /* ── progress ────────────────────────────────────────────────────────────────────────── */
   .card { background: #1a1a1a; border: 1px solid #333; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
   .card h2 { margin: 0; font: 800 22px/26px var(--sans); text-transform: uppercase; letter-spacing: -.02em; }
@@ -300,6 +315,12 @@
     <div id="reps">
       <div id="repnum">0</div>
       <div id="reptarget" class="data">/ 0</div>
+    </div>
+
+    <!-- shown while framing up or calibrating; hidden once the set is live -->
+    <div id="bigmsg" hidden>
+      <div id="bigmsg-title" class="hero">—</div>
+      <div id="bigmsg-sub" class="data">—</div>
     </div>
 
     <div style="flex:1"></div>
@@ -461,9 +482,17 @@
         </div>
       </div>
 
+      <label class="switch" id="warmup-row">
+        <span>Warm-up sets</span>
+        <input type="checkbox" id="warmup" checked>
+      </label>
+
       <p id="start-err" class="err"></p>
     </div>
-    <div class="foot"><button id="btn-start" class="primary">Start</button></div>
+    <div class="foot">
+      <button id="btn-calibrate">Calibrate</button>
+      <button id="btn-start" class="primary">Start</button>
+    </div>
   </section>
 
   <!-- rest -->
@@ -473,6 +502,11 @@
       <p id="rest-summary" class="muted data"></p>
       <div id="resttime">0:00</div>
       <div id="restbar"><div id="restfill"></div></div>
+      <div id="repfix">
+        <button type="button" data-rep="-1">&minus;</button>
+        <div><div id="rest-reps">0</div><div class="data" style="color:var(--on-surface-variant)">reps counted</div></div>
+        <button type="button" data-rep="1">+</button>
+      </div>
     </div>
     <div class="foot"><button id="btn-next" class="primary">Next set</button></div>
   </section>

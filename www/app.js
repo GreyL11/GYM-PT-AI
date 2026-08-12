@@ -1,6 +1,9 @@
 import { createLandmarker, startCamera, stopCamera, drawSkeleton } from './pose.js';
-import { EXERCISES, GROUPS, EQUIPMENT, INJURIES, defaultThresholds, createState, step } from './exercises.js';
-import { createCoach, createVoice, suggest } from './coach.js';
+import {
+  EXERCISES, GROUPS, EQUIPMENT, INJURIES, MIN_RANGE_DEG,
+  defaultThresholds, createState, step, calibrate,
+} from './exercises.js';
+import { createCoach, createVoice, suggest, warmupsFor } from './coach.js';
 import * as insights from './insights.js';
 import * as planner from './planner.js';
 import * as store from './store.js';
@@ -25,6 +28,9 @@ const el = {
   setup: $('sheet-setup'), setupEx: $('setup-ex'), setupHint: $('setup-hint'), setupLast: $('setup-last'),
   inSets: $('in-sets'), inReps: $('in-reps'), inLoad: $('in-load'),
   btnBack: $('btn-back'), btnStart: $('btn-start'), startErr: $('start-err'),
+  btnCalibrate: $('btn-calibrate'), warmup: $('warmup'), warmupRow: $('warmup-row'),
+  bigmsg: $('bigmsg'), bigTitle: $('bigmsg-title'), bigSub: $('bigmsg-sub'),
+  restReps: $('rest-reps'), repfix: $('repfix'),
   rest: $('sheet-rest'), restTime: $('resttime'), restFill: $('restfill'),
   restSummary: $('rest-summary'), btnNext: $('btn-next'),
   settings: $('sheet-settings'), setEx: $('set-ex'), sliders: $('sliders'), view: $('view'),
@@ -74,6 +80,28 @@ let wakeLock = null;
 let pendingEx = null;      // exercise chosen, awaiting its numbers
 let filter = 'All';
 let cameFromToday = true;  // so Back and "set finished" return where you actually came from
+
+// 'framing'    — waiting for you to walk to the bar and get into position
+// 'counting'   — 3, 2, 1 before the set starts
+// 'live'       — actually coaching
+// 'calibrating'— recording your range of motion, coaching nothing
+let mode = 'live';
+let scratch = createState();  // throwaway state so framing/calibration never bank reps
+let calSamples = [];
+let calUntil = 0;
+let framedFrames = 0;
+
+const CAL_SECONDS = 15;
+const FRAMED_FRAMES_NEEDED = 15;  // ~half a second held in the start position
+
+const buzz = (pattern) => navigator.vibrate?.(pattern);
+
+function big(title, sub) {
+  el.bigmsg.hidden = false;
+  el.bigTitle.textContent = title;
+  el.bigSub.textContent = sub ?? '';
+}
+const hideBig = () => { el.bigmsg.hidden = true; };
 
 // Without this the phone screens off mid-set and the camera stops. Re-acquired on resume, because
 // Android drops the lock whenever the app goes to the background.
@@ -348,8 +376,15 @@ function showSetup(exId, prefill = null) {
   const str = insights.strength(exId);
   if (str && str.changePct) notes.push(`Est. 1RM ${str.current} kg, ${str.changePct >= 0 ? '+' : ''}${str.changePct}%.`);
   el.setupLast.textContent = notes.join(' ');
+  syncWarmupRow();
 
   show(el.setup);
+}
+
+/** Warm-ups only make sense on heavy compounds, so hide the toggle when it would do nothing. */
+function syncWarmupRow() {
+  const eligible = pendingEx && warmupsFor(pendingEx, Number(el.inLoad.value) || 0).length > 0;
+  el.warmupRow.hidden = !eligible;
 }
 
 // ── HUD ──────────────────────────────────────────────────────────────────────────────────
@@ -358,7 +393,7 @@ function refreshHud() {
   const s = coach.state;
   if (s.idle) return;
   el.exname.textContent = s.name;
-  el.setinfo.textContent = `Set ${s.set}/${s.sets} · ${s.targetReps} reps · ${s.load} kg`;
+  el.setinfo.textContent = `${s.label} · ${s.targetReps} reps · ${s.load ? `${s.load} kg` : 'bodyweight'}`;
   el.reptarget.textContent = `/ ${s.targetReps}`;
   el.repnum.textContent = '0';
   thresholds = s.thresholds;
@@ -390,29 +425,116 @@ function loop() {
     const w = res.worldLandmarks?.[0];
 
     if (lm && w) {
-      const out = step(coach.state.exId, { lm, w, tMs, view }, setState, thresholds);
-      const cue = coach.onFrame(out);
-      if (cue) showCue(cue);
-      el.repnum.textContent = String(out.reps);
+      // Framing and calibration run the same analysis but bank nothing into the real set.
+      const live = mode === 'live';
+      const out = step(pendingEx ?? coach.state.exId, { lm, w, tMs, view },
+        live ? setState : scratch, thresholds);
+
+      if (mode === 'calibrating') onCalibrationFrame(out, tMs);
+      else if (mode === 'framing') onFramingFrame(out);
+      else if (live) {
+        const cue = coach.onFrame(out);
+        if (cue) { showCue(cue); buzz([70, 60, 70]); }
+        el.repnum.textContent = String(out.reps);
+      }
+
       el.status.textContent = out.visible ? `${Math.round(out.angle)}° · ${out.phase}` : 'Step back into frame';
       drawSkeleton(el.overlay.getContext('2d'), lm, {
-        width: el.overlay.width, height: el.overlay.height, bad: out.faults.length > 0,
+        width: el.overlay.width, height: el.overlay.height, bad: live && out.faults.length > 0,
       });
     } else {
       el.status.textContent = 'No one in frame';
+      if (mode === 'framing') big('Step back', 'I cannot see anyone');
       drawSkeleton(el.overlay.getContext('2d'), null, { width: el.overlay.width, height: el.overlay.height });
     }
   }
   requestAnimationFrame(loop);
 }
 
+// ── framing: do not start counting while the lifter walks to the bar ─────────────────────
+
+function onFramingFrame(out) {
+  if (!out.visible) {
+    framedFrames = 0;
+    big('Step back', 'I need to see all of you in frame');
+    return;
+  }
+  if (out.phase !== 'start') {
+    framedFrames = 0;
+    big('Get set', 'Stand in the starting position');
+    return;
+  }
+  framedFrames += 1;
+  if (framedFrames < FRAMED_FRAMES_NEEDED) {
+    big('Hold it', 'Got you');
+    return;
+  }
+  countIn();
+}
+
+function countIn() {
+  mode = 'counting';
+  let n = 3;
+  big(String(n), 'Starting');
+  voice.speak(String(n));
+  const id = setInterval(() => {
+    n -= 1;
+    if (n > 0) { big(String(n), 'Starting'); voice.speak(String(n)); return; }
+    clearInterval(id);
+    goLive();
+  }, 1000);
+}
+
+function goLive() {
+  mode = 'live';
+  hideBig();
+  setState = createState();
+  el.repnum.textContent = '0';
+  buzz(200);
+  coach.announceSet();
+}
+
+// ── calibration: learn this lifter's range of motion ─────────────────────────────────────
+
+function onCalibrationFrame(out, tMs) {
+  if (out.visible && out.m) calSamples.push(out.m);
+  const left = Math.ceil((calUntil - tMs) / 1000);
+  if (left > 0) {
+    big(String(left), out.visible ? 'Keep repping' : 'I cannot see you — step back');
+    return;
+  }
+  finishCalibration();
+}
+
+function finishCalibration() {
+  running = false;
+  mode = 'live';
+  const patch = calibrate(pendingEx, calSamples);
+  if (!patch) {
+    big('Not enough movement', `I need to see at least ${MIN_RANGE_DEG}° of range. Try again.`);
+    voice.speak('I did not see enough movement. Try again.');
+    setTimeout(() => { hideBig(); showSetup(pendingEx); }, 3200);
+    return;
+  }
+  for (const [k, v] of Object.entries(patch)) store.setThreshold(pendingEx, k, v);
+  thresholds = store.getThresholds(pendingEx, defaultThresholds(pendingEx));
+  buzz([100, 80, 100]);
+  big('Calibrated', Object.entries(patch).map(([k, v]) => `${k} ${v}`).join(' · '));
+  voice.speak('Calibrated to your range.');
+  setTimeout(() => { hideBig(); showSetup(pendingEx); }, 3200);
+}
+
 function beginSet() {
   for (const s of SHEETS()) s.hidden = true;
   setState = createState();
+  scratch = createState();
+  framedFrames = 0;
   refreshHud();
   running = true;
   keepAwake();
-  coach.announceSet();
+  // Auto-start rather than counting reps while you are still walking to the bar.
+  mode = 'framing';
+  big('Get set', coach.state.hint);
   requestAnimationFrame(loop);
 }
 
@@ -422,21 +544,54 @@ el.btnStart.addEventListener('click', async () => {
   el.btnStart.disabled = true;
   el.startErr.textContent = '';
   try {
-    voice.enabled = el.voice.checked;
-    voice.unlock(); // must happen inside the gesture or iOS stays silent all session
-    if (!landmarker) { el.startErr.textContent = 'Loading pose model…'; landmarker = await createLandmarker(); }
-    if (!stream) stream = await startCamera(el.cam, el.facing.dataset.value);
-    el.startErr.textContent = '';
+    await ensureCamera();
     coach.select(pendingEx, {
       sets: Number(el.inSets.value) || undefined,
       reps: Number(el.inReps.value) || undefined,
       load: Number(el.inLoad.value),
+      warmup: el.warmup.checked,
     });
     beginSet();
   } catch (err) {
     el.startErr.textContent = `${err.name}: ${err.message}`;
   } finally {
     el.btnStart.disabled = false;
+  }
+});
+
+/** Model and camera are shared by starting a set and by calibrating. */
+async function ensureCamera() {
+  voice.enabled = el.voice.checked;
+  voice.unlock(); // must happen inside the gesture or iOS stays silent all session
+  if (!landmarker) { el.startErr.textContent = 'Loading pose model…'; landmarker = await createLandmarker(); }
+  if (!stream) stream = await startCamera(el.cam, el.facing.dataset.value);
+  el.startErr.textContent = '';
+}
+
+el.btnCalibrate.addEventListener('click', async () => {
+  el.btnCalibrate.disabled = true;
+  try {
+    await ensureCamera();
+    // Thresholds must be loaded before stepping, since rep endpoints live in them.
+    thresholds = store.getThresholds(pendingEx, defaultThresholds(pendingEx));
+    view = EXERCISES[pendingEx].view;
+    for (const s of SHEETS()) s.hidden = true;
+    el.repnum.textContent = '0';
+    el.exname.textContent = EXERCISES[pendingEx].name;
+    el.setinfo.textContent = 'Calibrating';
+    scratch = createState();
+    calSamples = [];
+    calUntil = performance.now() + CAL_SECONDS * 1000;
+    mode = 'calibrating';
+    running = true;
+    keepAwake();
+    voice.speak(`Do ${CAL_SECONDS} seconds of slow reps with your best form.`);
+    big(String(CAL_SECONDS), 'Slow reps, best form');
+    requestAnimationFrame(loop);
+  } catch (err) {
+    el.startErr.textContent = `${err.name}: ${err.message}`;
+  } finally {
+    el.btnCalibrate.disabled = false;
   }
 });
 
@@ -460,16 +615,41 @@ el.btnSaveProfile.addEventListener('click', () => {
   showToday();
 });
 
+let lastSet = null;   // so the ± correction can re-describe the set it just amended
+
+function describeSet(r, verdict) {
+  const bits = [`${r.faults} corrections.`];
+  if (r.slowdown > 1.25) bits.push(`Reps slowed ${Math.round((r.slowdown - 1) * 100)}% by the end.`);
+  if (verdict) {
+    const unit = verdict.reps ? 'reps' : 'kg';
+    bits.push(`Next time: ${verdict.to} ${unit} (${verdict.reason}).`);
+  }
+  return bits.join(' ');
+}
+
 el.btnEnd.addEventListener('click', () => {
   const r = coach.endSet(setState);
   setState = createState();
   running = false;
-  const bits = [`${r.record.reps} reps · ${r.faults} corrections.`];
-  if (r.slowdown > 1.25) bits.push(`Reps slowed ${Math.round((r.slowdown - 1) * 100)}% by the end.`);
-  if (r.verdict) bits.push(`Next time: ${r.verdict.to} kg (${r.verdict.reason}).`);
-  el.restSummary.textContent = bits.join(' ');
-  el.btnNext.textContent = r.done ? 'Pick next lift' : 'Next set';
+  hideBig();
+  lastSet = r;
+  // Warm-ups are not logged, so there is nothing to correct on them.
+  el.repfix.hidden = Boolean(r.warmup);
+  el.restReps.textContent = String(r.record.reps);
+  el.restSummary.textContent = describeSet(r, r.verdict);
+  el.btnNext.textContent = r.done ? 'Finish lift' : r.warmup ? 'Next warm-up' : 'Next set';
   startRest(r.rest, r.done);
+});
+
+// A miscounted rep would otherwise be permanent, and it feeds both progression and the analytics.
+el.repfix.addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b || !lastSet) return;
+  const amended = coach.amendReps(Number(b.dataset.rep));
+  if (!amended) return;
+  el.restReps.textContent = String(amended.reps);
+  lastSet.record.reps = amended.reps;
+  el.restSummary.textContent = describeSet(lastSet, lastSet.done ? amended.verdict : null);
 });
 
 el.btnSkip.addEventListener('click', goBack);
@@ -489,7 +669,8 @@ function startRest(seconds, done) {
   const id = setInterval(tick, 1000);
   el.btnNext.onclick = () => {
     clearInterval(id);
-    if (done) goBack();
+    // Progression is applied only now, so any ± correction above is already accounted for.
+    if (done) { coach.finishExercise(); goBack(); }
     else { refreshHud(); beginSet(); }
   };
 }
@@ -547,8 +728,10 @@ for (const b of document.querySelectorAll('[data-step]')) {
     const input = $(b.dataset.for);
     const next = (Number(input.value) || 0) + Number(b.dataset.step);
     input.value = Math.min(Number(input.max), Math.max(Number(input.min), next));
+    if (input === el.inLoad) syncWarmupRow();
   });
 }
+el.inLoad.addEventListener('input', syncWarmupRow);
 el.view.addEventListener('change', () => { view = el.view.value; });
 el.btnReset.addEventListener('click', () => {
   const s = coach.state;

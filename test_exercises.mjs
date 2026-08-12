@@ -5,7 +5,9 @@
 // under test and roughly plausible everywhere else, which is all the pure functions can tell.
 
 import assert from 'node:assert/strict';
-import { EXERCISES, GROUPS, byGroup, defaultThresholds, createState, step, angle, torsoLean, IDX } from './www/exercises.js';
+import {
+  EXERCISES, GROUPS, byGroup, defaultThresholds, createState, step, calibrate, angle, torsoLean, IDX,
+} from './www/exercises.js';
 
 const rad = (d) => (d * Math.PI) / 180;
 const norm = (v) => { const m = Math.hypot(v.x, v.y) || 1; return { x: v.x / m, y: v.y / m }; };
@@ -227,6 +229,61 @@ check('lateral raise flags going above shoulder height', () => {
   assert.ok(high.faults.includes('tooHigh'));
   const level = run('lateralRaise', hold(6, () => body({ shoulderAngle: 88, elbowAngle: 170 })), { view: 'front' });
   assert.ok(!level.faults.includes('tooHigh'));
+});
+
+// ── calibration ──────────────────────────────────────────────────────────────────────────
+
+/** Fake a recording: `n` frames sweeping the primary angle between lo and hi and back. */
+const sweep = (lo, hi, n = 120) => Array.from({ length: n }, (_, i) => {
+  const t = (i % 40) / 40;
+  const primary = t < 0.5 ? hi - (hi - lo) * (t * 2) : lo + (hi - lo) * ((t - 0.5) * 2);
+  return { primary, torsoLean: 20, shoulder: 40, elbow: primary, knee: primary, hip: 150 };
+});
+
+check('calibration refuses to learn from too little', () => {
+  assert.equal(calibrate('squat', sweep(90, 170, 10)), null, 'a handful of frames is not a recording');
+  assert.equal(calibrate('squat', sweep(150, 165, 120)), null, 'a 15 degree twitch is not a rep');
+});
+
+check('calibration learns the rep endpoints in the right direction', () => {
+  // Squat travels from a high angle (standing) down to a low one (bottom).
+  const sq = calibrate('squat', sweep(85, 172));
+  assert.ok(sq.repStart > sq.repEnd, 'squat starts high and finishes low');
+  assert.ok(Math.abs(sq.repStart - 167) <= 6, `expected ~167, got ${sq.repStart}`);
+  assert.ok(Math.abs(sq.repEnd - 90) <= 6, `expected ~90, got ${sq.repEnd}`);
+
+  // Pushdown is the inverted arc: flexed at the top, extended at the bottom.
+  const pd = calibrate('pushdown', sweep(62, 178));
+  assert.ok(pd.repEnd > pd.repStart, 'pushdown starts low and finishes high');
+});
+
+check('calibration sets range-of-motion thresholds but never technique tolerances', () => {
+  const patch = calibrate('bench', sweep(70, 170));
+  assert.ok('lockout' in patch, 'lockout is anatomy — where your arm actually straightens');
+  assert.ok(!('flare' in patch), 'elbow flare is technique and must not be learned from you');
+  assert.ok(!('wristBend' in patch), 'nor wrist stacking');
+  assert.ok(!('torsoLean' in patch), 'nor torso lean');
+
+  const squat = calibrate('squat', sweep(85, 172));
+  assert.ok(!('heelLift' in squat) && !('valgusRatio' in squat), 'squat faults stay at defaults too');
+  assert.ok(!('depth' in squat), 'squat measures depth by hip-vs-knee, not an angle threshold');
+
+  const skull = calibrate('skullcrusher', sweep(50, 168));
+  assert.ok('depth' in skull, 'lifts that DO use an angle for depth get it calibrated');
+  assert.ok(skull.depth > 50 && skull.depth < 70, `depth should sit just inside the bottom, got ${skull.depth}`);
+});
+
+check('calibrated endpoints actually drive rep counting', () => {
+  // Someone with a shallow squat: their "bottom" is 120 degrees, well short of the 95 default.
+  const shallowRep = [
+    ...hold(3, () => body({ kneeAngle: 165 })),
+    ...hold(6, () => body({ kneeAngle: 122 })),
+    ...hold(6, () => body({ kneeAngle: 165 })),
+  ];
+  assert.equal(run('squat', shallowRep).st.reps, 0, 'default thresholds never see a rep');
+
+  const patch = calibrate('squat', sweep(120, 168));
+  assert.equal(run('squat', shallowRep, { thresholds: patch }).st.reps, 1, 'calibrated ones do');
 });
 
 check('every exercise threshold has a slider range defined in app.js', async () => {
