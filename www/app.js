@@ -34,6 +34,8 @@ const el = {
 
 // Slider bounds for every tunable. [min, max, step, label]
 const RANGES = {
+  repStart:       [10, 180, 1,         'Rep start angle'],
+  repEnd:         [10, 180, 1,         'Rep finish angle'],
   lockout:        [140, 180, 1,        'Lockout angle'],
   torsoLean:      [10, 80, 1,          'Max torso lean'],
   torsoMin:       [10, 70, 1,          'Min hinge angle'],

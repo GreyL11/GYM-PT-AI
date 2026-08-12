@@ -498,9 +498,16 @@ export function byGroup(group) {
   return Object.entries(EXERCISES).filter(([, ex]) => ex.group === group).map(([id, ex]) => ({ id, ...ex }));
 }
 
-/** Thresholds an exercise ships with, cloned so the settings sliders can mutate freely. */
+/**
+ * Thresholds an exercise ships with, cloned so the settings sliders can mutate freely.
+ *
+ * The rep endpoints ride along as ordinary thresholds rather than living as constants, because
+ * they are the most personal numbers in the whole system — your range of motion, not a textbook's.
+ * That way calibration, the sliders and localStorage all reach them through one path.
+ */
 export function defaultThresholds(exId) {
-  return { ...EXERCISES[exId].thresholds };
+  const ex = EXERCISES[exId];
+  return { repStart: ex.rep.start, repEnd: ex.rep.end, ...ex.thresholds };
 }
 
 export function createState() {
@@ -562,7 +569,8 @@ export function step(exId, frame, st, T) {
   // ── rep state machine ──────────────────────────────────────────────────────────────────
   // `dir` is +1 when the working phase increases the angle (pushdown, overhead press, lateral
   // raise) and -1 when it decreases it (squat, bench, curl). One machine covers both.
-  const { start, end } = ex.rep;
+  const start = T.repStart ?? ex.rep.start;
+  const end = T.repEnd ?? ex.rep.end;
   const dir = end > start ? 1 : -1;
   const atEnd = dir * (a - end) >= -HYSTERESIS;
   const atStart = dir * (a - start) <= HYSTERESIS;
