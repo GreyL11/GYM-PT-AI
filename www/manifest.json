@@ -4,14 +4,14 @@
   "start_url": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0b0d10",
-  "theme_color": "#0b0d10",
+  "background_color": "#0d0d0f",
+  "theme_color": "#0d0d0f",
   "icons": [
     {
-      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' fill='%230b0d10'/%3E%3Cg stroke='%233ddc84' stroke-width='34' stroke-linecap='round' fill='none'%3E%3Cpath d='M96 200v112M416 200v112M56 232v48M456 232v48M96 256h320'/%3E%3C/g%3E%3C/svg%3E",
+      "src": "icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any"
+      "purpose": "any maskable"
     }
   ]
 }

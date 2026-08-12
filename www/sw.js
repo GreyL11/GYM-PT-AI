@@ -6,7 +6,7 @@ const CACHE = 'gym-trainer-v1';
 // below caches whatever it successfully fetches — but "only bites at the gym with no signal" is
 // exactly the case this file exists for.
 const SHELL = [
-  './', 'index.html', 'manifest.json',
+  './', 'index.html', 'manifest.json', 'icon.svg',
   'app.js', 'pose.js', 'coach.js', 'exercises.js', 'store.js',
   'insights.js', 'planner.js', 'nutrition.js', 'technique.js',
 ];
