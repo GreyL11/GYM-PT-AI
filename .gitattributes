@@ -1,0 +1,10 @@
+* text=auto
+
+# Authored on Windows, executed on a Linux CI runner — CRLF here is a "bad interpreter" failure.
+gradlew text eol=lf
+*.sh text eol=lf
+
+*.png binary
+*.jar binary
+*.task binary
+*.wasm binary

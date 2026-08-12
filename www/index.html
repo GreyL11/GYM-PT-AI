@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0d10">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Trainer</title>
+<link rel="manifest" href="manifest.json">
+<style>
+  :root {
+    --bg: #0b0d10; --fg: #f2f4f7; --dim: #8b949e;
+    --good: #3ddc84; --bad: #ff5a3c; --panel: rgba(16,19,24,.88);
+    --safe-t: env(safe-area-inset-top, 0px);
+    --safe-b: env(safe-area-inset-bottom, 0px);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; overscroll-behavior: none; }
+  body {
+    background: var(--bg); color: var(--fg); font: 16px/1.4 system-ui, -apple-system, sans-serif;
+    -webkit-user-select: none; user-select: none;
+  }
+  #stage { position: fixed; inset: 0; }
+  #cam, #overlay { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  #cam { background: #000; }
+
+  .hud { position: absolute; inset: 0; pointer-events: none; display: flex; flex-direction: column; }
+  .hud > * { pointer-events: auto; }
+
+  #top {
+    display: flex; align-items: center; gap: 12px;
+    padding: calc(var(--safe-t) + 10px) 14px 10px;
+    background: linear-gradient(#000c, transparent);
+  }
+  #exname { font-weight: 650; font-size: 17px; }
+  #setinfo { color: var(--dim); font-size: 14px; }
+  #top .spacer { flex: 1; }
+  .chip {
+    background: var(--panel); border: 1px solid #ffffff1f; border-radius: 999px;
+    padding: 7px 13px; font-size: 14px; color: var(--fg);
+  }
+
+  #reps {
+    position: absolute; right: 16px; top: 50%; transform: translateY(-50%);
+    text-align: right; text-shadow: 0 2px 14px #000;
+  }
+  #repnum { font-size: 88px; font-weight: 800; line-height: .9; font-variant-numeric: tabular-nums; }
+  #reptarget { color: var(--dim); font-size: 16px; }
+
+  #cue {
+    margin: auto 14px 0; padding: 16px 18px; border-radius: 16px;
+    background: var(--bad); font-size: 21px; font-weight: 650;
+    opacity: 0; transition: opacity .18s; text-align: center;
+  }
+  #cue.show { opacity: 1; }
+
+  #status { margin: 8px 14px 0; text-align: center; color: var(--dim); font-size: 14px; min-height: 20px; }
+
+  #bottom {
+    display: flex; gap: 10px; padding: 12px 14px calc(var(--safe-b) + 14px);
+    background: linear-gradient(transparent, #000c 40%);
+  }
+  button {
+    flex: 0 0 auto; padding: 16px; border-radius: 14px; border: 0; font: inherit; font-weight: 650;
+    background: #1c2129; color: var(--fg);
+  }
+  #bottom button { flex: 1; }
+  button.primary { background: var(--good); color: #06210f; }
+  button:disabled { opacity: .4; }
+
+  /* start / rest / settings overlays */
+  .sheet {
+    position: absolute; inset: 0; background: var(--bg); z-index: 5;
+    padding: calc(var(--safe-t) + 24px) 22px calc(var(--safe-b) + 22px);
+    display: flex; flex-direction: column; gap: 14px; overflow-y: auto;
+  }
+  .sheet[hidden] { display: none; }
+  .sheet h1 { font-size: 26px; margin: 0; }
+  .sheet h2 { font-size: 17px; margin: 6px 0 0; }
+  .sheet p { color: var(--dim); margin: 0; }
+  .row { display: flex; align-items: center; gap: 12px; }
+  .row label { flex: 1; font-size: 15px; }
+  .row output { width: 58px; text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; }
+  input[type=range] { flex: 1.4; accent-color: var(--good); }
+  #resttime { font-size: 72px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .grow { flex: 1; }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <video id="cam" playsinline muted autoplay></video>
+  <canvas id="overlay"></canvas>
+
+  <div class="hud">
+    <div id="top">
+      <div>
+        <div id="exname">—</div>
+        <div id="setinfo">—</div>
+      </div>
+      <div class="spacer"></div>
+      <button class="chip" id="btn-settings" style="flex:0">Adjust</button>
+    </div>
+
+    <div id="reps">
+      <div id="repnum">0</div>
+      <div id="reptarget">/ 0</div>
+    </div>
+
+    <div class="grow"></div>
+    <div id="cue"></div>
+    <div id="status"></div>
+
+    <div id="bottom">
+      <button id="btn-end" class="primary">End set</button>
+      <button id="btn-skip">Skip lift</button>
+    </div>
+  </div>
+
+  <!-- start -->
+  <section class="sheet" id="sheet-start">
+    <h1>Trainer</h1>
+    <p>Four lifts, live form checking, on-device. Nothing is uploaded.</p>
+    <h2 id="start-ex">—</h2>
+    <p id="start-hint">—</p>
+    <div class="row">
+      <label for="facing">Camera</label>
+      <select id="facing" class="chip"><option value="environment">Rear</option><option value="front">Front</option></select>
+    </div>
+    <div class="row">
+      <label for="voice">Voice cues</label>
+      <input type="checkbox" id="voice" checked>
+    </div>
+    <div class="grow"></div>
+    <p id="start-err" style="color:var(--bad)"></p>
+    <button class="primary" id="btn-start">Start session</button>
+  </section>
+
+  <!-- rest -->
+  <section class="sheet" id="sheet-rest" hidden>
+    <h1>Rest</h1>
+    <div id="resttime">0:00</div>
+    <p id="rest-summary"></p>
+    <div class="grow"></div>
+    <button class="primary" id="btn-next">Next set</button>
+  </section>
+
+  <!-- settings -->
+  <section class="sheet" id="sheet-settings" hidden>
+    <h1>Adjust</h1>
+    <p>Thresholds for <b id="set-ex">—</b>. Your proportions and camera angle are not the textbook
+       numbers — if it nags you when your form is fine, loosen it here. Saved per lift.</p>
+    <div class="row">
+      <label for="view">Camera view</label>
+      <select id="view" class="chip"><option value="side">Side-on</option><option value="front">Front-on</option></select>
+    </div>
+    <div id="sliders"></div>
+    <div class="grow"></div>
+    <button id="btn-reset">Reset to defaults</button>
+    <button class="primary" id="btn-close-settings">Done</button>
+  </section>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

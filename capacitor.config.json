@@ -1,0 +1,11 @@
+{
+  "appId": "com.jaswanth.trainer",
+  "appName": "Trainer",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}
