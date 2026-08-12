@@ -26,8 +26,12 @@
 
   <path opacity="0.9" fill="#EDE6DA" d="M74.4,29.7 L77.4,32.2 L80.0,35.0 L82.3,38.2 L84.2,41.6 L85.6,45.3 L86.6,49.2 L87.2,53.1 L87.2,57.2 L86.8,61.2 L85.8,65.2 L84.4,69.0 L82.5,72.6 L80.1,76.0 L77.4,79.1 L74.2,81.8 L70.8,84.1 L67.0,86.0 L63.1,87.4 L59.0,88.3 L54.8,88.7 L50.6,88.6 L46.5,87.9 L42.4,86.8 L38.6,85.1 L35.0,83.0 L31.6,80.4 L28.7,77.5 L26.1,74.2 L23.9,70.7 L22.2,66.9 L21.0,62.9 L20.3,58.8 L20.1,54.7 L20.5,50.7 L21.3,46.7 L22.6,42.8 L24.3,39.2 L26.5,35.8 L29.0,32.8 L31.9,30.1 L35.1,27.7 L38.5,25.8 L42.1,24.3 L45.8,23.3 L46.7,26.7 L43.5,28.0 L40.6,29.6 L37.8,31.6 L35.4,33.9 L33.3,36.4 L31.5,39.1 L30.0,42.0 L28.9,45.1 L28.2,48.2 L27.8,51.4 L27.9,54.6 L28.3,57.7 L29.0,60.7 L30.2,63.7 L31.6,66.4 L33.3,69.0 L35.3,71.3 L37.6,73.4 L40.1,75.2 L42.8,76.7 L45.6,77.8 L48.5,78.7 L51.5,79.1 L54.6,79.3 L57.7,79.1 L60.7,78.5 L63.6,77.6 L66.4,76.3 L69.1,74.7 L71.5,72.8 L73.8,70.7 L75.7,68.2 L77.4,65.6 L78.8,62.7 L79.8,59.7 L80.5,56.5 L80.8,53.3 L80.7,50.1 L80.2,46.8 L79.4,43.6 L78.1,40.5 L76.5,37.6 L74.5,34.9 L72.2,32.4 Z"/>
 
-  <!-- the bar, with its collars — the one red mark, like a seal -->
-  <path d="M14 54 H94" stroke="#E0533C" stroke-width="7" stroke-linecap="round" fill="none"/>
-  <path d="M22 44 V64 M86 44 V64" stroke="#E0533C" stroke-width="5" stroke-linecap="round"
-        fill="none" opacity="0.8"/>
+  <!-- the bar, with its collars — the one coloured mark, like a seal on an ink drawing.
+       Sakura (桜色, #FFB7C5) is the obvious Japanese pink and was tried first, but it sits at almost
+       the same lightness as the bone stroke: where the bar crosses the ring the two merge, and by
+       32px it is a single pale shape. Contrast against the ensō matters more here than fidelity to
+       the palette, so this is a pink with somewhere to fall from. -->
+  <path d="M14 54 H94" stroke="#FF4D8D" stroke-width="7" stroke-linecap="round" fill="none"/>
+  <path d="M22 44 V64 M86 44 V64" stroke="#FF4D8D" stroke-width="5" stroke-linecap="round"
+        fill="none" opacity="0.85"/>
 </svg>

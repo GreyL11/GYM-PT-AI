@@ -30,20 +30,20 @@
 
         <path
             android:pathData="M14,54 L94,54"
-            android:strokeColor="#E0533C"
+            android:strokeColor="#FF4D8D"
             android:strokeWidth="7"
             android:strokeLineCap="round" />
         <path
             android:pathData="M22,44 L22,64"
-            android:strokeColor="#E0533C"
+            android:strokeColor="#FF4D8D"
             android:strokeWidth="5"
-            android:strokeAlpha="0.8"
+            android:strokeAlpha="0.85"
             android:strokeLineCap="round" />
         <path
             android:pathData="M86,44 L86,64"
-            android:strokeColor="#E0533C"
+            android:strokeColor="#FF4D8D"
             android:strokeWidth="5"
-            android:strokeAlpha="0.8"
+            android:strokeAlpha="0.85"
             android:strokeLineCap="round" />
     </group>
 </vector>
