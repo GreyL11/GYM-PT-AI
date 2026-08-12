@@ -8,6 +8,9 @@ on:
 jobs:
   apk:
     runs-on: ubuntu-latest
+    # Needed to publish the release below.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -39,8 +42,14 @@ jobs:
       - run: ./gradlew assembleDebug --no-daemon
         working-directory: android
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: trainer-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
+      # A release asset, not a build artifact: artifacts are a zip and need a signed-in GitHub
+      # session, which is useless on a phone. A release asset is a direct one-tap APK download.
+      # `gh` is preinstalled on the runner, so this needs no third-party action.
+      - name: Publish APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk trainer.apk
+          gh release create "build-${{ github.run_number }}" trainer.apk \
+            --title "Trainer build ${{ github.run_number }}" \
+            --notes "Debug APK. Download trainer.apk below, tap to install. Always newest: /releases/latest"
