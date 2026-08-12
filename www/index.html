@@ -234,6 +234,24 @@
   #restbar { width: 200px; height: 12px; background: #262626; border-radius: 999px; overflow: hidden; }
   #restfill { height: 100%; width: 100%; background: var(--neon); transition: width 1s linear; }
 
+  /* ── progress ────────────────────────────────────────────────────────────────────────── */
+  .card { background: #1a1a1a; border: 1px solid #333; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+  .card h2 { margin: 0; font: 800 22px/26px var(--sans); text-transform: uppercase; letter-spacing: -.02em; }
+  .card .line { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .card .k { color: var(--on-surface-variant); font: 700 13px/18px var(--mono); letter-spacing: .05em; text-transform: uppercase; }
+  .card .v { font: 700 18px/22px var(--mono); font-variant-numeric: tabular-nums; }
+  .up { color: var(--neon); }
+  .flat { color: var(--on-surface-variant); }
+  .warn { color: #ffb4ab; }
+
+  .bar { display: flex; align-items: center; gap: 12px; }
+  .bar .name { width: 92px; flex: 0 0 auto; font: 700 13px/18px var(--mono); text-transform: uppercase; color: var(--on-surface-variant); }
+  .bar .track { flex: 1; height: 12px; background: #262626; border-radius: 999px; overflow: hidden; position: relative; }
+  .bar .fill { height: 100%; background: var(--neon); }
+  .bar .fill.under { background: #6b6b6b; }
+  .bar .fill.over { background: #ffb4ab; }
+  .bar .n { width: 34px; text-align: right; font: 700 14px/18px var(--mono); font-variant-numeric: tabular-nums; }
+
   /* ── adjust ──────────────────────────────────────────────────────────────────────────── */
   #sliders { display: flex; flex-direction: column; gap: var(--stack); }
   .slider { background: #1a1a1a; border: 1px solid #333; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
@@ -307,8 +325,20 @@
     </div>
     <div class="foot">
       <button id="btn-browse">All lifts</button>
+      <button id="btn-progress">Progress</button>
       <button id="btn-profile">Profile</button>
     </div>
+  </section>
+
+  <!-- progress -->
+  <section class="sheet" id="sheet-progress" hidden>
+    <header>
+      <button id="btn-progress-back" type="button">&larr;</button>
+      <div class="brand" style="flex:1;text-align:center;font-size:24px">Progress</div>
+      <div style="width:44px"></div>
+    </header>
+    <div class="body" id="progress-body"></div>
+    <div class="foot"><button id="btn-progress-done" class="primary">Done</button></div>
   </section>
 
   <!-- profile -->

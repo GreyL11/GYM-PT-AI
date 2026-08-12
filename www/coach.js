@@ -5,6 +5,7 @@
 // setup screen, so an exercise with no entry still works on FALLBACK.
 
 import { EXERCISES, defaultThresholds } from './exercises.js';
+import * as insights from './insights.js';
 import * as planner from './planner.js';
 import * as store from './store.js';
 
@@ -110,6 +111,7 @@ export function createCoach({ speak }) {
         target: current.reps,
         load: current.load,
         faults: { ...st.faultCounts },
+        repMs: st.repMs.map(Math.round),
       };
       store.appendLog(record);
       exerciseSets.push(record);
@@ -118,11 +120,13 @@ export function createCoach({ speak }) {
       say(hit ? `Set done. ${st.reps} reps. Rest ${current.rest} seconds.`
               : `Set done. ${st.reps} of ${current.reps}. Rest ${current.rest} seconds.`, { force: true });
 
+      const slowdown = insights.fatigue(st.repMs);
+
       setIdx += 1;
-      if (setIdx < current.sets) return { done: false, rest: current.rest, record, faults };
+      if (setIdx < current.sets) return { done: false, rest: current.rest, record, faults, slowdown };
 
       const verdict = this.progress(exerciseSets);
-      return { done: true, rest: current.rest, record, faults, verdict };
+      return { done: true, rest: current.rest, record, faults, slowdown, verdict };
     },
 
     /** Linear progression, gated on form. Missing reps OR a messy set holds the load. */
@@ -139,6 +143,15 @@ export function createCoach({ speak }) {
         say(`All reps, clean. Next time ${next} kilos.`, { force: true });
         return { moved: true, from: load, to: next, reason: 'all reps clean' };
       }
+      // Three sessions stuck at the same weight is a stall, not a bad day. Back off and rebuild
+      // rather than grinding the same failed weight indefinitely.
+      if (insights.shouldDeload(exId)) {
+        const next = insights.deloadTo(load);
+        store.setLoad(exId, next);
+        say(`Stuck here three sessions. Dropping to ${next} kilos to rebuild.`, { force: true });
+        return { moved: true, deload: true, from: load, to: next, reason: 'stalled three sessions' };
+      }
+
       say(`Staying at ${load} kilos next time. ${!allReps ? 'You missed reps.' : 'Form broke down.'}`, { force: true });
       return { moved: false, from: load, to: load, reason: !allReps ? 'reps missed' : 'form broke down' };
     },

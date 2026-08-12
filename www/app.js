@@ -1,6 +1,7 @@
 import { createLandmarker, startCamera, stopCamera, drawSkeleton } from './pose.js';
 import { EXERCISES, GROUPS, EQUIPMENT, INJURIES, defaultThresholds, createState, step } from './exercises.js';
 import { createCoach, createVoice, suggest } from './coach.js';
+import * as insights from './insights.js';
 import * as planner from './planner.js';
 import * as store from './store.js';
 
@@ -14,7 +15,9 @@ const el = {
   facing: $('facing'), voice: $('voice'), btnPickerBack: $('btn-picker-back'),
   today: $('sheet-today'), todayDay: $('today-day'), todayName: $('today-name'),
   todayList: $('todaylist'), todayNote: $('today-note'),
-  btnBrowse: $('btn-browse'), btnProfile: $('btn-profile'),
+  btnBrowse: $('btn-browse'), btnProfile: $('btn-profile'), btnProgress: $('btn-progress'),
+  progress: $('sheet-progress'), progressBody: $('progress-body'),
+  btnProgressBack: $('btn-progress-back'), btnProgressDone: $('btn-progress-done'),
   profile: $('sheet-profile'), inBw: $('in-bw'), inDays: $('in-days'),
   pExperience: $('p-experience'), pGoal: $('p-goal'), pEquipment: $('p-equipment'),
   pInjuries: $('p-injuries'), profileWarn: $('profile-warn'),
@@ -106,7 +109,7 @@ function renderList() {
   }
 }
 
-const SHEETS = () => [el.today, el.profile, el.picker, el.setup, el.rest, el.settings];
+const SHEETS = () => [el.today, el.profile, el.picker, el.setup, el.rest, el.settings, el.progress];
 
 function show(sheet) {
   running = false;
@@ -157,8 +160,93 @@ function showToday() {
     b.addEventListener('click', () => showSetup(item.exId, item));
     el.todayList.appendChild(b);
   }
+  const notes = [];
   const left = session.exercises.length - done.size;
-  el.todayNote.textContent = left ? `${left} of ${session.exercises.length} to go.` : 'Session complete. Good work.';
+  notes.push(left ? `${left} of ${session.exercises.length} to go.` : 'Session complete. Good work.');
+
+  // Anything today that you hammered less than 48h ago.
+  for (const w of insights.recoveryWarnings(session, now)) {
+    notes.push(`${w.group} was trained ${w.hoursAgo}h ago — still recovering.`);
+  }
+  // Lifts the log says you are stuck on; progression will back them off after this session.
+  const stalled = session.exercises.filter((e) => insights.shouldDeload(e.exId)).map((e) => e.name);
+  if (stalled.length) notes.push(`Stalled: ${stalled.join(', ')}. Dropping the weight to rebuild.`);
+
+  el.todayNote.textContent = notes.join(' ');
+}
+
+// ── progress ─────────────────────────────────────────────────────────────────────────────
+
+const node = (tag, cls, text) => {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;
+  return n;
+};
+
+function line(k, v, cls) {
+  const row = node('div', 'line');
+  row.append(node('span', 'k', k), node('span', `v ${cls ?? ''}`.trim(), v));
+  return row;
+}
+
+function showProgress() {
+  show(el.progress);
+  const s = insights.summary();
+  const body = el.progressBody;
+  body.innerHTML = '';
+
+  if (!s.totalSets) {
+    body.append(node('p', 'muted', 'Nothing logged yet. Finish a set and this fills up.'));
+    return;
+  }
+
+  // Weekly volume — hard sets per muscle group against the 10–20 productive range.
+  const vol = node('div', 'card');
+  vol.append(node('h2', null, 'This week'));
+  vol.append(node('p', 'muted data', `${s.totalSets} sets logged all time`));
+  for (const [group, n] of Object.entries(s.volume)) {
+    const bar = node('div', 'bar');
+    const track = node('div', 'track');
+    const fill = node('div', 'fill');
+    fill.style.width = `${Math.min(100, (n / 25) * 100)}%`;
+    if (n < insights.VOLUME_TARGET.low) fill.classList.add('under');
+    if (n > insights.VOLUME_TARGET.high) fill.classList.add('over');
+    track.append(fill);
+    bar.append(node('span', 'name', group), track, node('span', 'n', String(n)));
+    vol.append(bar);
+  }
+  vol.append(node('p', 'muted data', `Target ${insights.VOLUME_TARGET.low}–${insights.VOLUME_TARGET.high} sets per group`));
+  body.append(vol);
+
+  // Per-lift strength and stalls.
+  for (const lift of s.lifts) {
+    const card = node('div', 'card');
+    card.append(node('h2', null, lift.name));
+    if (lift.strength) {
+      const { current, changePct, days, sessions } = lift.strength;
+      card.append(line('Est. 1RM', `${current} kg`));
+      card.append(line('Change', `${changePct >= 0 ? '+' : ''}${changePct}% in ${days}d`,
+        changePct > 0 ? 'up' : changePct < 0 ? 'warn' : 'flat'));
+      card.append(line('Sessions', String(sessions)));
+    } else {
+      card.append(line('Est. 1RM', 'needs 2 sessions', 'flat'));
+    }
+    if (lift.deload) card.append(line('Stalled', `${lift.stalled} sessions — deloading`, 'warn'));
+    else if (lift.stalled > 1) card.append(line('Stalled', `${lift.stalled} sessions`, 'flat'));
+    if (lift.topFault) {
+      card.append(line('Weak point', `${lift.topFault.label} (${Math.round(lift.topFault.share * 100)}%)`, 'warn'));
+    }
+    body.append(card);
+  }
+
+  // What you get told off for most, across everything.
+  if (s.faults.length) {
+    const f = node('div', 'card');
+    f.append(node('h2', null, 'Most common corrections'));
+    for (const x of s.faults) f.append(line(x.label, `${x.count}`, 'warn'));
+    body.append(f);
+  }
 }
 
 // ── profile ──────────────────────────────────────────────────────────────────────────────
@@ -246,9 +334,18 @@ function showSetup(exId, prefill = null) {
   el.inLoad.value = s.load;
 
   const done = store.history(exId).slice(-3);
-  el.setupLast.textContent = done.length
+  const notes = [done.length
     ? `Last time: ${done.map((d) => d.reps).join(', ')} reps at ${done.at(-1).load} kg.`
-    : 'First time on this lift.';
+    : 'First time on this lift.'];
+
+  // Tell them their own weak point before the set, when they can still do something about it.
+  const fault = insights.faultFingerprint(exId)[0];
+  if (fault && fault.share > 0.3) {
+    notes.push(`Watch: ${fault.label.toLowerCase()} — ${Math.round(fault.share * 100)}% of your corrections here.`);
+  }
+  const str = insights.strength(exId);
+  if (str && str.changePct) notes.push(`Est. 1RM ${str.current} kg, ${str.changePct >= 0 ? '+' : ''}${str.changePct}%.`);
+  el.setupLast.textContent = notes.join(' ');
 
   show(el.setup);
 }
@@ -347,6 +444,9 @@ el.btnBack.addEventListener('click', goBack);
 el.btnPickerBack.addEventListener('click', showToday);
 el.btnBrowse.addEventListener('click', showPicker);
 el.btnProfile.addEventListener('click', showProfile);
+el.btnProgress.addEventListener('click', showProgress);
+el.btnProgressBack.addEventListener('click', showToday);
+el.btnProgressDone.addEventListener('click', showToday);
 el.btnProfileBack.addEventListener('click', () => (planner.hasProfile() ? showToday() : null));
 
 el.btnSaveProfile.addEventListener('click', () => {
@@ -362,9 +462,10 @@ el.btnEnd.addEventListener('click', () => {
   const r = coach.endSet(setState);
   setState = createState();
   running = false;
-  el.restSummary.textContent = r.verdict
-    ? `${r.record.reps} reps · ${r.faults} corrections. Next time: ${r.verdict.to} kg (${r.verdict.reason}).`
-    : `${r.record.reps} reps · ${r.faults} corrections.`;
+  const bits = [`${r.record.reps} reps · ${r.faults} corrections.`];
+  if (r.slowdown > 1.25) bits.push(`Reps slowed ${Math.round((r.slowdown - 1) * 100)}% by the end.`);
+  if (r.verdict) bits.push(`Next time: ${r.verdict.to} kg (${r.verdict.reason}).`);
+  el.restSummary.textContent = bits.join(' ');
   el.btnNext.textContent = r.done ? 'Pick next lift' : 'Next set';
   startRest(r.rest, r.done);
 });

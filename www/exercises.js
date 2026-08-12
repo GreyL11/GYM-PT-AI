@@ -512,6 +512,7 @@ export function createState() {
     tEnd: 0,          // ms timestamp they arrived at the finish position
     faultFrames: {},  // consecutive frames each fault has held
     faultCounts: {},  // total times each fault fired this set — feeds progression
+    repMs: [],        // duration of each completed rep; late reps slowing down is fatigue
   };
 }
 
@@ -573,6 +574,7 @@ export function step(exId, frame, st, T) {
   } else if (atStart) {
     st.phase = 'start';
     st.reps += 1;
+    if (st.tLeftStart) st.repMs.push(tMs - st.tLeftStart);
     st.tLeftStart = 0;
     st.tEnd = 0;
     repCompleted = true;
