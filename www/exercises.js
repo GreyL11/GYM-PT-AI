@@ -73,10 +73,30 @@ const upperArmFault = (cue) => ({
   test: (c) => c.jointAngle('shoulder') > c.T.upperArm,
 });
 
+/** Upper arm held at a FIXED angle while the elbow does the work — the rule for every
+ *  overhead/lying triceps extension. Drifting off that angle turns it into a different lift. */
+const fixedUpperArmFault = (cue) => ({
+  id: 'upperArm', cue, phase: 'any',
+  test: (c) => Math.abs(c.jointAngle('shoulder') - c.T.upperArmTarget) > c.T.upperArmTol,
+});
+
+/** Elbows travelling out away from the ribs on a row. */
+const elbowPathFault = (cue) => ({
+  id: 'elbowPath', cue, phase: 'end',
+  test: (c) => c.jointAngle('shoulder') > c.T.elbowPath,
+});
+
 /** Stopped short at the finish position. `over` = the angle is too LARGE at the bottom. */
 const shortRangeFault = (cue, joint = 'elbow') => ({
   id: 'depth', cue, phase: 'end',
   test: (c) => c.jointAngle(joint) > c.T.depth,
+});
+
+/** Lifts done leaning over: standing up out of the lean is how the weight gets cheated up.
+ *  Also the rule for lifts where a lean is REQUIRED — a chest dip done upright is a triceps dip. */
+const minLeanFault = (cue, id = 'heave') => ({
+  id, cue, phase: 'any',
+  test: (c) => torsoLean(c.W.hip, c.W.shoulder) < c.T.torsoMin,
 });
 
 /** Bar drifting away from the body — measured against leg length so it scales with the lifter. */
@@ -129,6 +149,44 @@ const benchLike = (name, cameraHint, over = {}) => ({
         return Math.abs(angle(l.shoulder, l.elbow, l.wrist) - angle(r.shoulder, r.elbow, r.wrist)) > c.T.asymmetry;
       },
     },
+  ],
+});
+
+/**
+ * Straight-arm raises — side, front and rear delt. The delt they hit is the PLANE the arm travels
+ * through, which is a camera-view difference, not a rules difference: every one of them is the
+ * shoulder opening from ~15° to shoulder height with a fixed elbow.
+ *
+ * `hinged` swaps the torso rule round. Upright raises fault on leaning (that's swinging the weight
+ * up); a rear delt raise is done hinged over, so there the fault is standing back UP out of it.
+ */
+const raiseLike = (name, view, cameraHint, { hinged = false, ...over } = {}) => ({
+  name, group: 'Shoulders', view, cameraHint, needs: ARMS_SIDE,
+  // Rotation at the shoulder, not the elbow: arm hanging down → up to shoulder height.
+  rep: { start: 18, end: 82 },
+  primary: (c) => c.jointAngle('shoulder'),
+  thresholds: {
+    maxHeight: 105, elbowStraight: 145, eccentricMs: 400,
+    ...(hinged ? { torsoMin: 50 } : { torsoLean: 12 }),
+    ...over,
+  },
+  faults: [
+    {
+      id: 'tooHigh',
+      cue: 'Stop at shoulder height. Higher is your traps, not your delts.',
+      phase: 'end',
+      test: (c) => c.jointAngle('shoulder') > c.T.maxHeight,
+    },
+    {
+      id: 'elbowBend',
+      cue: 'Keep the elbow fixed. You are curling it up.',
+      phase: 'any',
+      test: (c) => c.jointAngle('elbow') < c.T.elbowStraight,
+    },
+    hinged
+      ? minLeanFault('Stay hinged over. Stop standing up into it.')
+      : torsoLeanFault('No swinging. Let the weight do the work on the way down.', 'swing'),
+    fastEccentricFault('Lower it under control.'),
   ],
 });
 
@@ -238,11 +296,49 @@ export const EXERCISES = {
     'Phone at bench height, side-on or 45° from the foot end. Both arms in frame.',
   ),
 
+  // Upper chest, lower chest and flat are the same press at a different bench angle — which the
+  // rules genuinely cannot see, so they are separate lifts only so the planner and the log can
+  // tell them apart. The flare tolerance is the one thing the angle actually changes.
   inclineBench: benchLike(
     'Incline bench press',
     'Phone at bench height, side-on. Both arms and the bar path in frame.',
     { flare: 70 }, // an incline naturally rides a touch more tucked
   ),
+
+  declineBench: benchLike(
+    'Decline bench press',
+    'Phone at bench height, side-on. Both arms and the bar path in frame.',
+    { flare: 82 }, // a decline presses wider, and that is not a fault here
+  ),
+
+  dbBench: benchLike(
+    'Dumbbell bench press',
+    'Phone at bench height, side-on or 45° from the foot end. Both arms in frame.',
+  ),
+
+  inclineDbPress: benchLike(
+    'Incline dumbbell press',
+    'Phone at bench height, side-on. Both arms in frame.',
+    { flare: 70 },
+  ),
+
+  chestDip: {
+    name: 'Chest dip',
+    group: 'Chest',
+    view: 'side',
+    cameraHint: 'Phone side-on at chest height, 2 m away. Whole body in frame.',
+    needs: ARMS_SIDE,
+    rep: { start: 168, end: 85 },
+    primary: (c) => c.jointAngle('elbow'),
+    thresholds: { lockout: 162, torsoMin: 20, depth: 100, eccentricMs: 500 },
+    faults: [
+      // The mirror image of the triceps dip rule: here the forward lean is the whole point.
+      minLeanFault('Lean forward over your hands. Upright makes this a triceps dip.', 'upright'),
+      shortRangeFault('Deeper. Chest down between your hands.'),
+      lockoutFault('Lock the elbows out at the top.'),
+      fastEccentricFault('Control the descent.'),
+    ],
+  },
 
   pushup: {
     name: 'Push-up',
@@ -298,20 +394,49 @@ export const EXERCISES = {
     primary: (c) => c.jointAngle('elbow'),
     thresholds: { lockout: 158, torsoMin: 32, elbowPath: 55, eccentricMs: 0 },
     faults: [
-      {
-        id: 'heave',
-        cue: 'Stay hinged over. Stop standing up into it.',
-        phase: 'any',
-        // A bent row lives at roughly 45° from vertical; standing up is how people cheat it.
-        test: (c) => torsoLean(c.W.hip, c.W.shoulder) < c.T.torsoMin,
-      },
-      {
-        id: 'elbowPath',
-        cue: 'Elbows tight to your body. Row to your hip, not your chest.',
-        phase: 'end',
-        test: (c) => c.jointAngle('shoulder') > c.T.elbowPath,
-      },
+      // A bent row lives at roughly 45° from vertical; standing up is how people cheat it.
+      minLeanFault('Stay hinged over. Stop standing up into it.'),
+      elbowPathFault('Elbows tight to your body. Row to your hip, not your chest.'),
       lockoutFault('Full stretch at the bottom. Let the bar hang.'),
+    ],
+  },
+
+  cableRow: {
+    name: 'Seated cable row',
+    group: 'Back',
+    view: 'side',
+    cameraHint: 'Phone side-on at chest height. Torso, both arms and the handle in frame.',
+    needs: ARMS_SIDE,
+    rep: { start: 165, end: 75 },
+    primary: (c) => c.jointAngle('elbow'),
+    thresholds: { lockout: 158, torsoLean: 22, elbowPath: 50, eccentricMs: 0 },
+    faults: [
+      torsoLeanFault('Stop rocking. Move it with your back, not your bodyweight.'),
+      elbowPathFault('Elbows tight past your ribs, not out wide.'),
+      lockoutFault('Let your arms straighten all the way out at the front.'),
+    ],
+  },
+
+  straightArmPulldown: {
+    name: 'Straight-arm pulldown',
+    group: 'Back',
+    view: 'side',
+    cameraHint: 'Phone side-on at chest height, 2 m away. Whole torso and the working arm in frame.',
+    needs: ARMS_SIDE,
+    // Driven by the shoulder, not the elbow: arms sweep from overhead-forward down to the thighs.
+    rep: { start: 148, end: 25 },
+    primary: (c) => c.jointAngle('shoulder'),
+    thresholds: { lockout: 140, elbowStraight: 155, torsoLean: 22, depth: 40, eccentricMs: 0 },
+    faults: [
+      {
+        id: 'elbowBend',
+        cue: 'Arms straight. Bending the elbow makes this a pulldown.',
+        phase: 'any',
+        test: (c) => c.jointAngle('elbow') < c.T.elbowStraight,
+      },
+      torsoLeanFault('Hold your hinge. Stop bobbing up and down.'),
+      lockoutFault('Let your arms rise all the way back up for the stretch.', 'shoulder'),
+      shortRangeFault('All the way to your thighs.', 'shoulder'),
     ],
   },
 
@@ -363,37 +488,45 @@ export const EXERCISES = {
     ],
   },
 
-  lateralRaise: {
-    name: 'Lateral raise',
-    group: 'Shoulders',
-    view: 'front',
-    cameraHint: 'Phone FRONT-ON at chest height. Both arms in frame — this one needs a front view.',
-    needs: ARMS_SIDE,
-    // Abduction at the shoulder, not the elbow: arms down → out to shoulder height.
-    rep: { start: 18, end: 82 },
-    primary: (c) => c.jointAngle('shoulder'),
-    thresholds: { maxHeight: 105, elbowStraight: 145, torsoLean: 12, eccentricMs: 400 },
-    faults: [
-      {
-        id: 'tooHigh',
-        cue: 'Stop at shoulder height. Higher is your traps, not your delts.',
-        phase: 'end',
-        test: (c) => c.jointAngle('shoulder') > c.T.maxHeight,
-      },
-      {
-        id: 'elbowBend',
-        cue: 'Keep the elbow fixed. You are curling it up.',
-        phase: 'any',
-        test: (c) => c.jointAngle('elbow') < c.T.elbowStraight,
-      },
-      torsoLeanFault('No swinging. Let the weight do the work on the way down.', 'swing'),
-      fastEccentricFault('Lower it under control.'),
-    ],
-  },
+  // Side delt: arm goes out sideways, so the movement is in the frontal plane — the camera has to
+  // be in front of you or it is watching an arm come straight at it.
+  lateralRaise: raiseLike(
+    'Lateral raise', 'front',
+    'Phone FRONT-ON at chest height. Both arms in frame — this one needs a front view.',
+  ),
+
+  // Front delt: arm goes out forwards, so this one is the side-on view instead.
+  frontRaise: raiseLike(
+    'Front raise', 'side',
+    'Phone SIDE-ON at chest height, 2 m away. Torso and the working arm in frame.',
+    { elbowStraight: 150 },
+  ),
+
+  // Rear delt: hinged over, arms out sideways. Frontal plane again, but you are folded over it, so
+  // the phone goes low.
+  rearDeltRaise: raiseLike(
+    'Rear delt raise', 'front',
+    'Phone FRONT-ON and LOW, roughly knee height, 2 m away. Hinge over facing it.',
+    { hinged: true, maxHeight: 100, elbowStraight: 140 },
+  ),
+
+  // The cable versions are the same arc against constant tension, so the same rules hold. They
+  // exist separately because a cable stack and a dumbbell rack are not the same gym.
+  cableLateralRaise: raiseLike(
+    'Cable lateral raise', 'front',
+    'Phone FRONT-ON at chest height, working side nearest the stack. Both arms in frame.',
+  ),
+
+  cableFrontRaise: raiseLike(
+    'Cable front raise', 'side',
+    'Phone SIDE-ON at chest height, 2 m away. Torso and the working arm in frame.',
+    { elbowStraight: 150 },
+  ),
 
   // ── Biceps ─────────────────────────────────────────────────────────────────────────────
   curl: curlLike('Barbell curl', 'Phone side-on at chest height. Torso and both arms in frame.'),
   hammerCurl: curlLike('Hammer curl', 'Phone side-on at chest height. Torso and both arms in frame.'),
+  cableCurl: curlLike('Cable curl', 'Phone side-on at chest height. Torso and both arms in frame.'),
 
   // ── Triceps ────────────────────────────────────────────────────────────────────────────
   pushdown: {
@@ -428,14 +561,27 @@ export const EXERCISES = {
     primary: (c) => c.jointAngle('elbow'),
     thresholds: { lockout: 160, upperArmTarget: 92, upperArmTol: 20, depth: 72, eccentricMs: 700 },
     faults: [
-      {
-        id: 'upperArm',
-        cue: 'Upper arms still. You are turning it into a pullover.',
-        phase: 'any',
-        test: (c) => Math.abs(c.jointAngle('shoulder') - c.T.upperArmTarget) > c.T.upperArmTol,
-      },
+      fixedUpperArmFault('Upper arms still. You are turning it into a pullover.'),
       lockoutFault('Lock it out at the top.'),
       shortRangeFault('Go deeper. Bring it to your forehead.'),
+      fastEccentricFault('Slow the negative down.'),
+    ],
+  },
+
+  overheadExtension: {
+    name: 'Overhead cable extension',
+    group: 'Triceps',
+    view: 'side',
+    cameraHint: 'Phone side-on at chest height, facing away from the stack. Full overhead reach in frame.',
+    needs: ARMS_SIDE,
+    rep: { start: 165, end: 65 },
+    primary: (c) => c.jointAngle('elbow'),
+    // Same lift as the skullcrusher, stood up: the upper arms are held overhead instead of vertical.
+    thresholds: { lockout: 158, upperArmTarget: 158, upperArmTol: 22, depth: 80, eccentricMs: 500 },
+    faults: [
+      fixedUpperArmFault('Upper arms stay overhead. Only the elbow moves.'),
+      lockoutFault('Squeeze it out straight at the top.'),
+      shortRangeFault('Deeper. Let it stretch behind your head.'),
       fastEccentricFault('Slow the negative down.'),
     ],
   },
@@ -457,6 +603,48 @@ export const EXERCISES = {
     ],
   },
 };
+
+// ── fault severity ───────────────────────────────────────────────────────────────────────
+//
+// The app learns what is normal FOR YOU and stops nagging about it. That is right for technique
+// preferences and catastrophically wrong for injury risk: "you have rounded the bar off your shins
+// on all twenty sets" is not evidence that it is fine for you.
+//
+// So faults split in two. `safety` faults are never baselined away and never suppressed, no matter
+// how habitual. Everything else is `efficiency` — worth mentioning, not worth nagging.
+//
+// Note the same fault id can be either, depending on the lift: torso lean is a spinal-load problem
+// on a squat and merely sloppy on a pulldown.
+const SAFETY = {
+  squat: ['valgus', 'torso'],      // knees caving, folding under a loaded bar
+  deadlift: ['barDrift'],          // bar away from the shins is the classic back-rounder
+  rdl: ['barDrift'],
+  ohp: ['arch'],                   // hyperextending the lumbar to press
+  bench: ['flare', 'wrist'],       // shoulder and wrist joints
+  inclineBench: ['flare', 'wrist'],
+  declineBench: ['flare', 'wrist'],
+  dbBench: ['flare', 'wrist'],
+  inclineDbPress: ['flare', 'wrist'],
+  pushup: ['plank'],               // sagging hips load the lower back
+  row: ['heave'],                  // jerking a loaded bar with the spine
+  curl: ['swing'],
+  hammerCurl: ['swing'],
+  lateralRaise: ['tooHigh'],       // above shoulder height is impingement territory
+  frontRaise: ['tooHigh'],
+  cableLateralRaise: ['tooHigh'],
+  cableFrontRaise: ['tooHigh'],
+  cableCurl: ['swing'],
+  // ponytail: rear delt raise gets no safety fault. Its 'heave' is the same rule as the row's, but
+  // at rear-delt loads standing up out of the hinge is sloppy, not dangerous — and marking it
+  // safety would mean nagging about it forever.
+};
+
+export const isSafetyFault = (exId, faultId) => (SAFETY[exId] ?? []).includes(faultId);
+
+// Stamp it onto the rules themselves so step() can report it without a lookup.
+for (const [id, ex] of Object.entries(EXERCISES)) {
+  for (const f of ex.faults) f.severity = isSafetyFault(id, f.id) ? 'safety' : 'efficiency';
+}
 
 // ── calibration ──────────────────────────────────────────────────────────────────────────
 
@@ -508,7 +696,8 @@ export function calibrate(exId, samples) {
 //   equipment  what you need to do it, so the planner can skip what your gym lacks
 //   compound   multi-joint lifts get the heavy low-rep slots and go first in a session
 //   avoidFor   injuries this lift aggravates
-//   loadRatio  starting weight as a fraction of bodyweight; 0 means the lift IS your bodyweight
+//   loadRatio  starting weight as a fraction of bodyweight; 0 means the lift IS your bodyweight.
+//              For dumbbell lifts this is PER HAND, which is how they are loaded and logged.
 
 const META = {
   squat:        { equipment: 'barbell',    compound: true,  avoidFor: ['knee', 'lowerBack'], loadRatio: 0.60 },
@@ -516,15 +705,33 @@ const META = {
   lunge:        { equipment: 'dumbbell',   compound: true,  avoidFor: ['knee'],              loadRatio: 0.20 },
   bench:        { equipment: 'barbell',    compound: true,  avoidFor: ['shoulder'],          loadRatio: 0.50 },
   inclineBench: { equipment: 'barbell',    compound: true,  avoidFor: ['shoulder'],          loadRatio: 0.40 },
+  declineBench: { equipment: 'barbell',    compound: true,  avoidFor: ['shoulder'],          loadRatio: 0.45 },
+  dbBench:      { equipment: 'dumbbell',   compound: true,  avoidFor: ['shoulder'],          loadRatio: 0.20 },
+  inclineDbPress:{ equipment: 'dumbbell',  compound: true,  avoidFor: ['shoulder'],          loadRatio: 0.16 },
+  chestDip:     { equipment: 'bodyweight', compound: true,  avoidFor: ['shoulder', 'elbow'], loadRatio: 0 },
   pushup:       { equipment: 'bodyweight', compound: true,  avoidFor: [],                    loadRatio: 0 },
   deadlift:     { equipment: 'barbell',    compound: true,  avoidFor: ['lowerBack'],         loadRatio: 0.75 },
   row:          { equipment: 'barbell',    compound: true,  avoidFor: ['lowerBack'],         loadRatio: 0.45 },
   latPulldown:  { equipment: 'cable',      compound: true,  avoidFor: [],                    loadRatio: 0.50 },
+  // Supported and horizontal, so unlike the barbell row it survives a bad lower back — which is
+  // the whole reason to keep it in the catalogue.
+  cableRow:     { equipment: 'cable',      compound: true,  avoidFor: [],                    loadRatio: 0.45 },
+  straightArmPulldown:
+                { equipment: 'cable',      compound: false, avoidFor: [],                    loadRatio: 0.20 },
   ohp:          { equipment: 'barbell',    compound: true,  avoidFor: ['shoulder'],          loadRatio: 0.30 },
   lateralRaise: { equipment: 'dumbbell',   compound: false, avoidFor: ['shoulder'],          loadRatio: 0.06 },
+  frontRaise:   { equipment: 'dumbbell',   compound: false, avoidFor: ['shoulder'],          loadRatio: 0.05 },
+  rearDeltRaise:{ equipment: 'dumbbell',   compound: false, avoidFor: ['shoulder'],          loadRatio: 0.04 },
+  cableLateralRaise:
+                { equipment: 'cable',      compound: false, avoidFor: ['shoulder'],          loadRatio: 0.07 },
+  cableFrontRaise:
+                { equipment: 'cable',      compound: false, avoidFor: ['shoulder'],          loadRatio: 0.06 },
   curl:         { equipment: 'barbell',    compound: false, avoidFor: ['elbow'],             loadRatio: 0.20 },
   hammerCurl:   { equipment: 'dumbbell',   compound: false, avoidFor: ['elbow'],             loadRatio: 0.10 },
+  cableCurl:    { equipment: 'cable',      compound: false, avoidFor: ['elbow'],             loadRatio: 0.20 },
   pushdown:     { equipment: 'cable',      compound: false, avoidFor: ['elbow'],             loadRatio: 0.25 },
+  overheadExtension:
+                { equipment: 'cable',      compound: false, avoidFor: ['elbow'],             loadRatio: 0.20 },
   skullcrusher: { equipment: 'barbell',    compound: false, avoidFor: ['elbow'],             loadRatio: 0.20 },
   dip:          { equipment: 'bodyweight', compound: true,  avoidFor: ['shoulder', 'elbow'], loadRatio: 0 },
 };

@@ -231,6 +231,58 @@ check('lateral raise flags going above shoulder height', () => {
   assert.ok(!level.faults.includes('tooHigh'));
 });
 
+check('front raise counts on the shoulder, same arc as the lateral', () => {
+  const frames = [
+    ...hold(3, () => body({ shoulderAngle: 12, elbowAngle: 170 })),
+    ...hold(6, () => body({ shoulderAngle: 88, elbowAngle: 170 })),
+    ...hold(6, () => body({ shoulderAngle: 12, elbowAngle: 170 })),
+  ];
+  assert.equal(run('frontRaise', frames).st.reps, 1);
+});
+
+check('the two dips disagree about leaning forward, which is the whole difference', () => {
+  // `lean` tilts the torso off vertical, so 35 is a lifter leaning well over their hands.
+  const leaning = hold(6, () => body({ elbowAngle: 95, lean: 35 }));
+  const upright = hold(6, () => body({ elbowAngle: 95, lean: 5 }));
+
+  assert.ok(run('chestDip', upright).faults.includes('upright'), 'chest dip wants the lean');
+  assert.ok(!run('chestDip', leaning).faults.includes('upright'));
+
+  assert.ok(run('dip', leaning).faults.includes('torso'), 'triceps dip does not');
+  assert.ok(!run('dip', upright).faults.includes('torso'));
+});
+
+check('rear delt raise faults on standing up out of the hinge, not on leaning', () => {
+  const hinged = (over) => hold(6, () => body({ shoulderAngle: 75, elbowAngle: 165, lean: over }));
+  assert.ok(run('rearDeltRaise', hinged(65), { view: 'front' }).faults.length === 0, 'hinged over is correct');
+  assert.ok(run('rearDeltRaise', hinged(20), { view: 'front' }).faults.includes('heave'), 'stood up out of it');
+});
+
+check('straight-arm pulldown counts off the shoulder and wants the elbow locked', () => {
+  const frames = [
+    ...hold(3, () => body({ shoulderAngle: 150, elbowAngle: 175 })),
+    ...hold(6, () => body({ shoulderAngle: 20, elbowAngle: 175 })),
+    ...hold(6, () => body({ shoulderAngle: 150, elbowAngle: 175 })),
+  ];
+  const clean = run('straightArmPulldown', frames);
+  assert.equal(clean.st.reps, 1);
+  assert.ok(!clean.faults.includes('elbowBend'));
+
+  const bent = run('straightArmPulldown', hold(6, () => body({ shoulderAngle: 80, elbowAngle: 120 })));
+  assert.ok(bent.faults.includes('elbowBend'), 'a bent elbow makes it a pulldown');
+});
+
+check('overhead extension holds the upper arms overhead, the skullcrusher holds them vertical', () => {
+  // Same fault, same rule, different target angle — so each must accept its own position only.
+  const overhead = hold(6, () => body({ elbowAngle: 100, shoulderAngle: 160 }));
+  const vertical = hold(6, () => body({ elbowAngle: 100, shoulderAngle: 92 }));
+
+  assert.ok(!run('overheadExtension', overhead).faults.includes('upperArm'));
+  assert.ok(run('overheadExtension', vertical).faults.includes('upperArm'));
+  assert.ok(!run('skullcrusher', vertical).faults.includes('upperArm'));
+  assert.ok(run('skullcrusher', overhead).faults.includes('upperArm'));
+});
+
 // ── calibration ──────────────────────────────────────────────────────────────────────────
 
 /** Fake a recording: `n` frames sweeping the primary angle between lo and hi and back. */
@@ -284,6 +336,20 @@ check('calibrated endpoints actually drive rep counting', () => {
 
   const patch = calibrate('squat', sweep(120, 168));
   assert.equal(run('squat', shallowRep, { thresholds: patch }).st.reps, 1, 'calibrated ones do');
+});
+
+check('every lift can tell you how to do it', async () => {
+  const { TECHNIQUE, script, lines } = await import('./www/technique.js');
+  for (const [id, ex] of Object.entries(EXERCISES)) {
+    const t = TECHNIQUE[id];
+    assert.ok(t, `${id} has no how-to brief`);
+    assert.ok(t.setup && t.execute, `${id}'s brief is missing setup or execute`);
+    assert.ok(t.mistakes.length, `${id} lists no mistakes to avoid`);
+    assert.equal(lines(id).length, 3);
+    // The spoken version leads with camera placement, since that has to happen first.
+    assert.ok(script(id, ex.cameraHint).startsWith(ex.cameraHint), `${id} drops the camera hint`);
+  }
+  assert.equal(Object.keys(TECHNIQUE).length, Object.keys(EXERCISES).length, 'a brief for a lift that no longer exists');
 });
 
 check('every exercise threshold has a slider range defined in app.js', async () => {
