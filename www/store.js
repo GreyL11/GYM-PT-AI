@@ -7,7 +7,15 @@ const blank = {
   loads: {}, thresholds: {}, log: [], profile: null, reps: {}, meals: [], foods: {}, weights: [],
   // Device settings, as opposed to training ones: which pose model this phone can afford to run.
   settings: {},
+  // Boxing rounds live apart from `log`. That array is set-shaped — reps, load, target — and a
+  // round has none of those; forcing it in would mean every lifting analytic had to filter it out.
+  rounds: [],
 };
+
+export function appendRound(entry) {
+  const { rounds } = read();
+  write({ rounds: [...rounds, entry].slice(-500) });
+}
 
 export const getSetting = (key, fallback) => read().settings[key] ?? fallback;
 export const setSetting = (key, value) => write({ settings: { ...read().settings, [key]: value } });

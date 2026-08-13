@@ -930,6 +930,60 @@
   </section>
 
   <!-- set it up -->
+  <!-- boxing: rounds, not sets -->
+  <section class="sheet" id="sheet-boxing" hidden>
+    <header>
+      <button id="btn-box-back" type="button">&larr;</button>
+      <div class="brand" style="flex:1;text-align:center">Boxing</div>
+      <div style="width:44px"></div>
+    </header>
+    <div class="body">
+      <h1 id="box-title" class="hero" style="margin:0">—</h1>
+      <div class="hintcard"><span id="box-hint">—</span></div>
+      <p id="box-warn" class="err"></p>
+
+      <div>
+        <label class="fieldlabel" for="box-mode">Session</label>
+        <div class="chips wrap" id="box-mode"></div>
+      </div>
+
+      <div>
+        <label class="fieldlabel" for="box-stance">Stance</label>
+        <div class="chips wrap" id="box-stance"></div>
+      </div>
+
+      <div class="stepper">
+        <label for="in-rounds">Rounds</label>
+        <div class="ctl">
+          <button type="button" data-step="-1" data-for="in-rounds">&minus;</button>
+          <input type="number" id="in-rounds" min="1" max="15" step="1" inputmode="numeric">
+          <button type="button" data-step="1" data-for="in-rounds">+</button>
+        </div>
+      </div>
+
+      <div class="stepper">
+        <label for="in-work">Round length (seconds)</label>
+        <div class="ctl">
+          <button type="button" data-step="-30" data-for="in-work">&minus;</button>
+          <input type="number" id="in-work" min="30" max="600" step="30" inputmode="numeric">
+          <button type="button" data-step="30" data-for="in-work">+</button>
+        </div>
+      </div>
+
+      <div class="stepper">
+        <label for="in-rest">Rest (seconds)</label>
+        <div class="ctl">
+          <button type="button" data-step="-15" data-for="in-rest">&minus;</button>
+          <input type="number" id="in-rest" min="0" max="300" step="15" inputmode="numeric">
+          <button type="button" data-step="15" data-for="in-rest">+</button>
+        </div>
+      </div>
+
+      <p id="box-err" class="err"></p>
+    </div>
+    <div class="foot"><button id="btn-box-start" class="primary">Start bout</button></div>
+  </section>
+
   <section class="sheet" id="sheet-setup" hidden>
     <header>
       <button id="btn-back" type="button">&larr;</button>

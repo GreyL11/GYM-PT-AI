@@ -5,6 +5,10 @@ import {
   defaultThresholds, createState, step, calibrate, cameraCheck,
 } from './exercises.js';
 import { createCoach, createVoice, suggest, warmupsFor } from './coach.js';
+import {
+  MODES, STANCES, DEFAULT_BOUT, PUNCH_LABELS,
+  createBout, createBoutState, boxStep, boutAt, roundStats, trackingWarning,
+} from './boxing.js';
 import * as insights from './insights.js';
 import * as nutrition from './nutrition.js';
 import * as planner from './planner.js';
@@ -28,6 +32,10 @@ const el = {
   pExperience: $('p-experience'), pGoal: $('p-goal'), pEquipment: $('p-equipment'),
   pInjuries: $('p-injuries'), profileWarn: $('profile-warn'),
   pModel: $('p-model'), modelNote: $('model-note'),
+  boxing: $('sheet-boxing'), boxTitle: $('box-title'), boxHint: $('box-hint'), boxWarn: $('box-warn'),
+  boxMode: $('box-mode'), boxStance: $('box-stance'), boxErr: $('box-err'),
+  inRounds: $('in-rounds'), inWork: $('in-work'), inRest: $('in-rest'),
+  btnBoxBack: $('btn-box-back'), btnBoxStart: $('btn-box-start'),
   inBar: $('in-bar'), pPlates: $('p-plates'), plateNote: $('plate-note'),
   btnSaveProfile: $('btn-save-profile'), btnProfileBack: $('btn-profile-back'),
   btnExportFile: $('btn-export-file'), btnExportCopy: $('btn-export-copy'), backupMsg: $('backup-msg'),
@@ -205,9 +213,11 @@ setInterval(() => {
 
 // ── picker ───────────────────────────────────────────────────────────────────────────────
 
+const BOXING = 'Boxing';
+
 function renderGroups() {
   el.groups.innerHTML = '';
-  for (const g of ['All', ...GROUPS]) {
+  for (const g of ['All', ...GROUPS, BOXING]) {
     const b = document.createElement('button');
     b.textContent = g;
     b.setAttribute('aria-pressed', String(g === filter));
@@ -218,6 +228,22 @@ function renderGroups() {
 
 function renderList() {
   el.exlist.innerHTML = '';
+
+  // Boxing is measured in rounds, not sets, so it gets its own list and its own setup screen
+  // rather than being squeezed into the lift picker.
+  if (filter === BOXING) {
+    for (const [id, m] of Object.entries(MODES)) {
+      const b = document.createElement('button');
+      b.innerHTML = '<span class="nm"></span><span class="meta"></span>';
+      b.querySelector('.nm').textContent = m.label;
+      const last = store.read().rounds.filter((r) => r.mode === id).at(-1);
+      b.querySelector('.meta').textContent = last ? `last: ${last.punches} punches` : 'rounds';
+      b.addEventListener('click', () => showBoxing(id));
+      el.exlist.appendChild(b);
+    }
+    return;
+  }
+
   const items = Object.entries(EXERCISES).filter(([, ex]) => filter === 'All' || ex.group === filter);
   for (const [id, ex] of items) {
     const s = suggest(id);
@@ -230,7 +256,164 @@ function renderList() {
   }
 }
 
-const SHEETS = () => [el.today, el.profile, el.picker, el.setup, el.rest, el.settings, el.progress, el.eat];
+const SHEETS = () => [el.today, el.profile, el.picker, el.setup, el.rest, el.settings, el.progress, el.eat, el.boxing];
+
+// ── boxing ───────────────────────────────────────────────────────────────────────────────
+
+let bout = null;          // the configured bout: mode, stance, rounds, work, rest, startedAt
+let boutState = null;     // punch detector state, from createBoutState()
+let boutRound = 1;        // which round the punches below belong to
+let boutPunches = [];     // punches thrown in the current round
+let boutPhase = null;     // last phase seen, so transitions fire exactly once
+let boutDraft = { ...DEFAULT_BOUT };
+
+/** A real bell beats a synthesised voice saying "round one". Two tones for the end of a bout. */
+let audioCtx = null;
+function bell(times = 1) {
+  try {
+    audioCtx ??= new (window.AudioContext ?? window.webkitAudioContext)();
+    for (let i = 0; i < times; i += 1) {
+      const t0 = audioCtx.currentTime + i * 0.32;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, t0);
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(0.35, t0 + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.3);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(t0);
+      osc.stop(t0 + 0.32);
+    }
+  } catch { /* no audio is survivable; the screen still shows the clock */ }
+}
+
+function showBoxing(modeId) {
+  boutDraft = { ...boutDraft, mode: modeId };
+  show(el.boxing);
+  const m = MODES[modeId];
+  el.boxTitle.textContent = m.label;
+  el.boxHint.textContent = m.hint;
+  el.boxWarn.textContent = trackingWarning(modeId) ?? '';
+  el.inRounds.value = boutDraft.rounds;
+  el.inWork.value = boutDraft.workSec;
+  el.inRest.value = boutDraft.restSec;
+
+  wireChips(el.boxMode, Object.keys(MODES), boutDraft.mode, (v) => showBoxing(v));
+  wireChips(el.boxStance, STANCES, boutDraft.stance, (v) => { boutDraft.stance = v; });
+}
+
+async function startBout() {
+  el.btnBoxStart.disabled = true;
+  el.boxErr.textContent = '';
+  try {
+    await ensureCamera();
+    bout = createBout({
+      ...boutDraft,
+      rounds: Number(el.inRounds.value) || boutDraft.rounds,
+      workSec: Number(el.inWork.value) || boutDraft.workSec,
+      restSec: Number(el.inRest.value) || boutDraft.restSec,
+    });
+    boutState = createBoutState();
+    boutRound = 1;
+    boutPunches = [];
+    boutPhase = null;
+    bout.startedAt = performance.now();
+
+    for (const s of SHEETS()) s.hidden = true;
+    el.exname.textContent = MODES[bout.mode].label;
+    el.reptarget.textContent = 'PUNCHES';
+    el.repnum.textContent = '0';
+    el.btnEnd.textContent = 'End bout';
+    mode = 'boxing';
+    running = true;
+    keepAwake();
+    bell();
+    voice.speak(`Round one. Box.`);
+    startLoop();
+  } catch (err) {
+    el.boxErr.textContent = `${err.name}: ${err.message}`;
+  } finally {
+    el.btnBoxStart.disabled = false;
+  }
+}
+
+function onBoxingFrame(lm, w, tMs) {
+  const at = boutAt(bout, performance.now());
+
+  // Round and phase transitions, each fired exactly once.
+  if (at.round !== boutRound) {
+    logRound();
+    boutRound = at.round;
+    boutPunches = [];
+  }
+  if (at.phase !== boutPhase) {
+    if (boutPhase !== null) {
+      bell(at.phase === 'done' ? 3 : 1);
+      if (at.phase === 'rest') voice.speak(`Break. ${roundStats(boutPunches, bout.workSec).count} punches.`);
+      else if (at.phase === 'work') voice.speak(`Round ${at.round}. Box.`);
+    }
+    boutPhase = at.phase;
+  }
+
+  if (at.done) { finishBout(); return; }
+
+  const mmss = `${Math.floor(at.left / 60)}:${String(at.left % 60).padStart(2, '0')}`;
+  big(mmss, `Round ${at.round}/${bout.rounds} · ${at.phase === 'work' ? 'BOX' : 'REST'}`);
+  el.setinfo.textContent = `Round ${at.round}/${bout.rounds} · ${at.phase.toUpperCase()}`;
+
+  // Between rounds nobody is being judged.
+  if (at.phase !== 'work') return;
+
+  const out = boxStep({ lm, w, tMs }, boutState, { mode: bout.mode, stance: bout.stance });
+  if (!out.visible) { el.status.textContent = 'Step back into frame'; return; }
+
+  if (out.punch) {
+    boutPunches.push(out.punch);
+    el.repnum.textContent = String(boutPunches.length);
+  }
+  const fault = out.faults[0];
+  if (fault) {
+    showCue(fault.cue);
+    buzz(fault.severity === 'safety' ? [90, 60, 90] : [70]);
+    voice.speak(fault.cue);
+  }
+  const s = roundStats(boutPunches, bout.workSec);
+  el.status.textContent = `${s.perMinute}/min · ${Math.round(fps)}fps`;
+}
+
+function logRound() {
+  if (!boutPunches.length && !Object.keys(boutState.faultCounts).length) return;
+  const s = roundStats(boutPunches, bout.workSec);
+  store.appendRound({
+    at: new Date().toISOString(),
+    mode: bout.mode,
+    stance: bout.stance,
+    round: boutRound,
+    workSec: bout.workSec,
+    punches: s.count,
+    perMinute: s.perMinute,
+    byKind: s.byKind,
+    certainty: Math.round(s.certainty * 100) / 100,
+    medianReturnMs: s.medianReturnMs,
+    faults: { ...boutState.faultCounts },
+  });
+  boutState.faultCounts = {};
+}
+
+function finishBout() {
+  logRound();
+  running = false;
+  mode = 'live';
+  const all = store.read().rounds.slice(-bout.rounds);
+  const total = all.reduce((a, r) => a + r.punches, 0);
+  const kinds = {};
+  for (const r of all) for (const [k, n] of Object.entries(r.byKind ?? {})) kinds[k] = (kinds[k] ?? 0) + n;
+  const breakdown = Object.entries(kinds).map(([k, n]) => `${PUNCH_LABELS[k] ?? k} ${n}`).join(' · ');
+  big(`${total} punches`, breakdown || 'Bout complete');
+  voice.speak(`Bout complete. ${total} punches.`);
+  el.btnEnd.textContent = 'Done';
+}
 
 function show(sheet) {
   running = false;
@@ -796,6 +979,11 @@ function showProgress() {
 const LABELS = {
   barbell: 'Barbell', dumbbell: 'Dumbbell', cable: 'Cable machine', bodyweight: 'Bodyweight',
   shoulder: 'Shoulder', elbow: 'Elbow', lowerBack: 'Lower back', knee: 'Knee',
+  // Boxing modes and stances go through the same chip renderer, and without these the chips
+  // read "shadow", "bag", "pads" — the internal ids, straight on screen.
+  shadow: MODES.shadow.label, bag: MODES.bag.label, pads: MODES.pads.label,
+  orthodox: 'Orthodox', southpaw: 'Southpaw',
+  lite: 'Lite', full: 'Full',
 };
 
 /** Chip group behaviour. `data-multi` on the container toggles; otherwise it's a radio. */
@@ -1090,6 +1278,15 @@ function frame() {
     const w = wFilter.apply(res.worldLandmarks?.[0], tMs);
 
     if (lm && w) {
+      // Boxing has its own detector, its own clock and no rep state machine at all.
+      if (mode === 'boxing') {
+        onBoxingFrame(lm, w, tMs);
+        drawSkeleton(el.overlay.getContext('2d'), lm, {
+          width: el.overlay.width, height: el.overlay.height, bad: false,
+        });
+        return;
+      }
+
       // Framing and calibration run the same analysis but bank nothing into the real set.
       const live = mode === 'live';
       const out = step(pendingEx ?? coach.state.exId, { lm, w, tMs, view },
@@ -1331,6 +1528,8 @@ el.btnStartToday.addEventListener('click', () => {
 });
 
 el.btnBack.addEventListener('click', goBack);
+el.btnBoxBack.addEventListener('click', showPicker);
+el.btnBoxStart.addEventListener('click', startBout);
 el.btnPickerBack.addEventListener('click', showToday);
 el.btnBrowse.addEventListener('click', showPicker);
 el.btnProfile.addEventListener('click', showProfile);
@@ -1414,6 +1613,18 @@ function describeSet(r, verdict) {
 }
 
 el.btnEnd.addEventListener('click', () => {
+  // Boxing ends a bout, not a set — and there is no progression verdict to preview.
+  if (mode === 'boxing' || bout) {
+    if (running) { logRound(); running = false; }
+    mode = 'live';
+    bout = null;
+    el.btnEnd.textContent = 'End set';
+    el.reptarget.textContent = '/ 0';
+    hideBig();
+    showPicker();
+    return;
+  }
+
   const r = coach.endSet(setState);
   setState = createState();
   running = false;
