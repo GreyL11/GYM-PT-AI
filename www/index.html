@@ -162,10 +162,25 @@
   .muted { color: var(--on-surface-variant); margin: 0; }
 
   /* ── picker ──────────────────────────────────────────────────────────────────────────── */
+  /* Discipline sits ABOVE muscle group, because they are different questions: what kind of
+     training, then which part of the body. A segmented bar rather than pills, so it does not read
+     as one more filter alongside the ones underneath it. */
+  #disciplines {
+    flex: 0 0 auto; display: flex; gap: 6px; margin: 14px var(--margin) 0; padding: 4px;
+    background: var(--sc-highest); border-radius: 10px;
+  }
+  #disciplines button {
+    flex: 1; min-height: 52px; padding: 0 12px; border-radius: 7px; background: none;
+    color: var(--on-surface-variant); white-space: nowrap;
+  }
+  #disciplines button[aria-pressed="true"] { background: var(--neon); color: var(--on-neon); }
+  #disciplines:has(button:only-child) { display: none; }
+
   #groups {
     flex: 0 0 auto; display: flex; gap: 12px; overflow-x: auto; padding: 16px var(--margin);
     scrollbar-width: none;
   }
+  #groups[hidden] { display: none; }
   #groups::-webkit-scrollbar { display: none; }
   #groups button {
     min-height: 48px; padding: 0 16px; border-radius: 999px; background: transparent;
@@ -915,6 +930,7 @@
       <div class="brand" style="flex:1;text-align:center">Trainer</div>
       <div style="width:44px"></div>
     </header>
+    <div id="disciplines"></div>
     <div id="groups"></div>
     <div id="exlist"></div>
     <div id="picker-controls">

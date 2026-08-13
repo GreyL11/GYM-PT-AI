@@ -21,7 +21,7 @@ const el = {
   exname: $('exname'), setinfo: $('setinfo'), repnum: $('repnum'), reptarget: $('reptarget'),
   cue: $('cue'), status: $('status'),
   btnEnd: $('btn-end'), btnSkip: $('btn-skip'), btnSettings: $('btn-settings'),
-  picker: $('sheet-picker'), groups: $('groups'), exlist: $('exlist'),
+  picker: $('sheet-picker'), disciplines: $('disciplines'), groups: $('groups'), exlist: $('exlist'),
   facing: $('facing'), voice: $('voice'), btnPickerBack: $('btn-picker-back'),
   today: $('sheet-today'), todayDay: $('today-day'), todayName: $('today-name'),
   todayList: $('todaylist'), todayNote: $('today-note'),
@@ -213,11 +213,69 @@ setInterval(() => {
 
 // ── picker ───────────────────────────────────────────────────────────────────────────────
 
-const BOXING = 'Boxing';
+/**
+ * Disciplines — the top-level question, above muscle group.
+ *
+ * Boxing first arrived as one more chip beside Chest and Back, which reads fine with two entries
+ * and falls apart with four: "which muscle" and "what kind of training" are different questions,
+ * and only one of them applies to a round of shadowboxing.
+ *
+ * Adding a discipline is an entry here plus its own module. `groups` is the optional second-level
+ * filter; `rows` returns what to list, given that filter.
+ */
+const DISCIPLINES = {
+  gym: {
+    label: 'Gym',
+    groups: ['All', ...GROUPS],
+    rows: (f) => Object.entries(EXERCISES)
+      .filter(([, ex]) => f === 'All' || ex.group === f)
+      .map(([id, ex]) => {
+        const s = suggest(id);
+        return {
+          name: ex.name,
+          meta: `${s.sets}×${s.reps} · ${s.load ? `${s.load} kg` : 'bodyweight'}`,
+          pick: () => showSetup(id),
+        };
+      }),
+  },
+  boxing: {
+    label: 'Boxing',
+    groups: null,   // rounds, not body parts
+    rows: () => Object.entries(MODES).map(([id, m]) => {
+      const last = store.read().rounds.filter((r) => r.mode === id).at(-1);
+      return {
+        name: m.label,
+        meta: last ? `last: ${last.punches} punches` : 'rounds',
+        pick: () => showBoxing(id),
+      };
+    }),
+  },
+};
+
+let discipline = 'gym';
+
+function renderDisciplines() {
+  el.disciplines.innerHTML = '';
+  for (const [id, d] of Object.entries(DISCIPLINES)) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = d.label;
+    b.setAttribute('aria-pressed', String(id === discipline));
+    b.addEventListener('click', () => {
+      discipline = id;
+      filter = 'All';
+      renderPicker();
+    });
+    el.disciplines.appendChild(b);
+  }
+}
 
 function renderGroups() {
+  const groups = DISCIPLINES[discipline].groups;
+  el.groups.hidden = !groups;
+  if (!groups) return;
   el.groups.innerHTML = '';
-  for (const g of ['All', ...GROUPS, BOXING]) {
+  for (const g of groups) {
     const b = document.createElement('button');
     b.textContent = g;
     b.setAttribute('aria-pressed', String(g === filter));
@@ -228,32 +286,20 @@ function renderGroups() {
 
 function renderList() {
   el.exlist.innerHTML = '';
-
-  // Boxing is measured in rounds, not sets, so it gets its own list and its own setup screen
-  // rather than being squeezed into the lift picker.
-  if (filter === BOXING) {
-    for (const [id, m] of Object.entries(MODES)) {
-      const b = document.createElement('button');
-      b.innerHTML = '<span class="nm"></span><span class="meta"></span>';
-      b.querySelector('.nm').textContent = m.label;
-      const last = store.read().rounds.filter((r) => r.mode === id).at(-1);
-      b.querySelector('.meta').textContent = last ? `last: ${last.punches} punches` : 'rounds';
-      b.addEventListener('click', () => showBoxing(id));
-      el.exlist.appendChild(b);
-    }
-    return;
-  }
-
-  const items = Object.entries(EXERCISES).filter(([, ex]) => filter === 'All' || ex.group === filter);
-  for (const [id, ex] of items) {
-    const s = suggest(id);
+  for (const row of DISCIPLINES[discipline].rows(filter)) {
     const b = document.createElement('button');
-    b.innerHTML = `<span class="nm"></span><span class="meta"></span>`;
-    b.querySelector('.nm').textContent = ex.name;
-    b.querySelector('.meta').textContent = `${s.sets}×${s.reps} · ${s.load} kg`;
-    b.addEventListener('click', () => showSetup(id));
+    b.innerHTML = '<span class="nm"></span><span class="meta"></span>';
+    b.querySelector('.nm').textContent = row.name;
+    b.querySelector('.meta').textContent = row.meta;
+    b.addEventListener('click', row.pick);
     el.exlist.appendChild(b);
   }
+}
+
+function renderPicker() {
+  renderDisciplines();
+  renderGroups();
+  renderList();
 }
 
 const SHEETS = () => [el.today, el.profile, el.picker, el.setup, el.rest, el.settings, el.progress, el.eat, el.boxing];
@@ -424,8 +470,7 @@ function showPicker() {
   pendingEx = null;
   coach.clear();
   show(el.picker);
-  renderGroups();
-  renderList();
+  renderPicker();
 }
 
 // ── today's plan ─────────────────────────────────────────────────────────────────────────
