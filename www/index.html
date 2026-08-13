@@ -356,6 +356,16 @@
   }
   .err { color: #ff8a80; margin: 0; font: 700 14px/20px var(--mono); }
 
+  /* What to hang on the bar. Read at the rack with a bar in your hands, so it is the loudest
+     instrument text on the screen after the weight itself. */
+  .plateline {
+    margin: 0; padding: 14px 16px; background: var(--sc); border: 1px solid var(--outline-variant);
+    border-left: 3px solid var(--neon); border-radius: 12px;
+    font: 700 15px/22px var(--mono); letter-spacing: .04em; text-transform: uppercase;
+  }
+  .plateline[hidden] { display: none; }
+  .plateline .warn { display: block; margin-top: 4px; font-size: 12px; }
+
   /* ── dashboard ───────────────────────────────────────────────────────────────────────── */
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gutter); }
   .grid2 > .card { padding: 14px; gap: 8px; min-width: 0; }
@@ -859,6 +869,21 @@
         <p id="profile-warn" class="err"></p>
       </div>
 
+      <div class="stepper">
+        <label for="in-bar">Barbell weight (kg)</label>
+        <div class="ctl">
+          <button type="button" data-step="-2.5" data-for="in-bar">&minus;</button>
+          <input type="number" id="in-bar" min="2.5" max="30" step="2.5" inputmode="decimal">
+          <button type="button" data-step="2.5" data-for="in-bar">+</button>
+        </div>
+      </div>
+
+      <div>
+        <label class="fieldlabel" for="p-plates">Plates your gym has (kg)</label>
+        <div class="chips wrap" id="p-plates" data-multi></div>
+        <p class="muted data" id="plate-note" style="margin-top:10px"></p>
+      </div>
+
       <details id="backup">
         <summary>Backup</summary>
         <p class="muted">Everything is on this phone and nowhere else. No account, no cloud — so if
@@ -909,6 +934,7 @@
       <h1 id="setup-ex" class="hero" style="margin:0">—</h1>
       <div class="hintcard"><span id="setup-hint">—</span></div>
       <p id="setup-last" class="muted data"></p>
+      <p id="setup-plates" class="plateline" hidden></p>
 
       <div class="card" id="howto" hidden>
         <div class="line">

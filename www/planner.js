@@ -15,7 +15,73 @@ export const DEFAULT_PROFILE = {
   daysPerWeek: 3,
   equipment: ['barbell', 'dumbbell', 'cable', 'bodyweight'],
   injuries: [],
+  bar: 20,                 // kg — men's Olympic. 15 for a women's bar, ~10 for an EZ curl bar
+  plates: [25, 20, 15, 10, 5, 2.5, 1.25],  // what your gym actually stocks, kg
 };
+
+// ── what the bar can actually be loaded to ───────────────────────────────────────────────
+//
+// The app used to round every prescription to 2.5 kg, which quietly assumes your gym has 1.25 kg
+// plates — they go on in pairs, so the smallest change you can make to a bar is TWICE the smallest
+// plate you own. A gym whose smallest plate is 2.5 kg cannot make 62.5 kg at all, and telling
+// someone to load it is an instruction that cannot be followed.
+//
+// Plates are assumed to be available in quantity. Running out of 20s and having to hang six 5s
+// instead is a real gym problem, but tracking your gym's inventory is not something anyone is
+// going to keep up to date.
+
+// A profile saved before this existed has neither field, and a restored old backup is the same,
+// so both fall back rather than producing NaN kilos at the rack.
+const barOf = (p) => p.bar ?? DEFAULT_PROFILE.bar;
+const platesOf = (p) => (p.plates?.length ? p.plates : DEFAULT_PROFILE.plates);
+
+/** The smallest total change possible on a barbell: one plate per side, so twice the smallest. */
+export const barbellStep = (profile = getProfile()) => 2 * Math.min(...platesOf(profile));
+
+/** The nearest weight this gym's bar can actually be loaded to. */
+export function achievableLoad(target, profile = getProfile()) {
+  const bar = barOf(profile);
+  if (target <= bar) return bar;
+  const step = barbellStep(profile);
+  return Math.round((target - bar) / step) * step + bar;
+}
+
+/**
+ * What to hang on each end, biggest plates first — fewest discs to lift, and the standard sets are
+ * canonical enough that greedy is also the fewest possible.
+ *
+ * @returns {{bar:number, perSide:Array<{kg:number,n:number}>, actual:number, exact:boolean}}
+ *   `actual` is what you would really end up with, which differs from the target when the gym
+ *   cannot make it. `exact` says whether it matched.
+ */
+export function loadout(total, profile = getProfile()) {
+  const bar = barOf(profile);
+  if (total < bar) return { bar, perSide: [], actual: bar, exact: total === bar, under: true };
+
+  let left = (total - bar) / 2;
+  const perSide = [];
+  for (const kg of [...platesOf(profile)].sort((a, b) => b - a)) {
+    const n = Math.floor((left + 1e-9) / kg);
+    if (n > 0) { perSide.push({ kg, n }); left -= n * kg; }
+  }
+  return {
+    bar,
+    perSide,
+    actual: Math.round((total - left * 2) * 100) / 100,
+    exact: left < 1e-9,
+    under: false,
+  };
+}
+
+/** "Bar + 20 + 1.25 per side" — the line you read while loading. */
+export function loadoutText(total, profile = getProfile()) {
+  const l = loadout(total, profile);
+  if (l.bar === undefined) return '';
+  if (l.under) return `Less than the ${l.bar} kg bar`;
+  if (!l.perSide.length) return 'Empty bar';
+  const discs = l.perSide.flatMap(({ kg, n }) => Array(n).fill(kg)).join(' + ');
+  return `Bar + ${discs} per side`;
+}
 
 export const getProfile = () => ({ ...DEFAULT_PROFILE, ...(store.read().profile ?? {}) });
 export const setProfile = (patch) => store.write({ profile: { ...getProfile(), ...patch } });
@@ -83,7 +149,10 @@ const round2 = (kg) => Math.max(0, Math.round(kg / 2.5) * 2.5);
 export function startingLoad(exId, profile = getProfile()) {
   const ex = EXERCISES[exId];
   if (!ex.loadRatio) return 0;
-  return round2(profile.bodyweight * ex.loadRatio * (EXPERIENCE[profile.trainingAge] ?? 1));
+  const raw = round2(profile.bodyweight * ex.loadRatio * (EXPERIENCE[profile.trainingAge] ?? 1));
+  // A barbell can only be what its plates allow. Dumbbells and stacks come in their own steps and
+  // are not ours to model, so they keep the plain 2.5 rounding.
+  return ex.equipment === 'barbell' ? achievableLoad(raw, profile) : raw;
 }
 
 export function scheme(exId, profile = getProfile()) {
@@ -91,9 +160,13 @@ export function scheme(exId, profile = getProfile()) {
   return { ...(EXERCISES[exId].compound ? table.compound : table.isolation) };
 }
 
-/** Heavy lower-body compounds jump 5 kg a session; everything else 2.5. */
-export const increment = (exId) =>
-  (EXERCISES[exId].compound && EXERCISES[exId].group === 'Legs' ? 5 : 2.5);
+/** Heavy lower-body compounds jump 5 kg a session; everything else 2.5 — but never smaller than
+ *  the bar can actually change by, or progression prescribes a weight nobody can load. */
+export const increment = (exId, profile = getProfile()) => {
+  const ex = EXERCISES[exId];
+  const base = ex.compound && ex.group === 'Legs' ? 5 : 2.5;
+  return ex.equipment === 'barbell' ? Math.max(base, barbellStep(profile)) : base;
+};
 
 /** Compounds need real rest; isolation does not. */
 export const restSeconds = (exId) => (EXERCISES[exId].compound ? 180 : 75);

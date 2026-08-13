@@ -108,11 +108,12 @@ the 95° default — had **every rep go uncounted**. After calibration the same 
 
 ## 5. What it knows about you
 
-A one-time profile, six fields, all of which change what the app does:
+A one-time profile, seven fields, all of which change what the app does:
 
 | Field | What it drives |
 |---|---|
 | Bodyweight | Starting weight for every lift, via a per-lift ratio |
+| Bar & plates | What the bar can be loaded to, and therefore how finely weight can be added |
 | Experience | Multiplies those starting weights (1.0 / 1.35 / 1.7) |
 | Goal | Rep scheme — strength 5×5, muscle 4×8, endurance 3×15 |
 | Days per week | Which split you get, and which weekdays you train |
@@ -121,6 +122,25 @@ A one-time profile, six fields, all of which change what the app does:
 
 **Age, sex and height are deliberately not collected.** Nothing in the planner would use them, and
 a question that changes no decision is just friction.
+
+### What the bar can actually be loaded to
+
+The app used to round every prescription to 2.5 kg, which quietly assumes 1.25 kg plates exist.
+They go on in pairs, so the smallest change possible on a barbell is **twice** the smallest plate
+you own — a gym that stops at 2.5 kg cannot make 62.5 kg, and telling someone to load it is an
+instruction that cannot be followed.
+
+So the profile carries the bar weight and the plate sizes, and three things fall out of them:
+
+- **The loadout line**, biggest plates first — fewest discs to lift, which for the standard sets is
+  also the fewest possible. Barbell lifts only; a cable stack is a pin position.
+- **The increment**, raised to the plate step where that is coarser than the usual 2.5 kg.
+- **Every weight that gets written**, snapped to the grid — not just the steps between them. A load
+  carried over from before the plates were set, or restored from an old backup, is already off the
+  grid, and adding a clean 5 kg to it would keep it off the grid forever.
+
+Plates are assumed available in quantity. Running out of 20s and hanging six 5s instead is a real
+gym problem, but nobody is going to keep a plate inventory up to date.
 
 ### The weekly plan
 
@@ -315,14 +335,14 @@ Latest build: https://github.com/GreyL11/GYM-PT-AI/releases/latest (~15 MB)
 
 ## 10. Tests
 
-83 checks across five suites, run in CI before every APK.
+88 checks across five suites, run in CI before every APK.
 
 | Suite | Covers |
 |---|---|
 | `test_exercises.mjs` (30) | Angle maths, rep counting in both directions, jitter rejection, every fault rule, view gating, visibility gating, calibration, a how-to brief for every lift |
-| `test_planner.mjs` (11) | Weekday mapping, equipment and injury filtering, rep schemes, load scaling, no duplicate lifts per session |
+| `test_planner.mjs` (15) | Weekday mapping, equipment and injury filtering, rep schemes, load scaling, no duplicate lifts per session, plate maths and loadable weights |
 | `test_insights.mjs` (9) | 1RM edges, session grouping, stall detection, deload maths, fingerprint shares, volume windows, fatigue |
-| `test_coach.mjs` (9) | Warm-up ramps, preview-then-commit progression, rep correction, bodyweight rep progression, deload |
+| `test_coach.mjs` (10) | Warm-up ramps, preview-then-commit progression, rep correction, bodyweight rep progression, deload, snapping to loadable weights |
 | `test_nutrition.mjs` (23) | Macro arithmetic, food table consistency, the day's log, meal slots, water and fluid, weight trend, target correction and its refusals, backup round-trip |
 
 Fed by synthetic landmark frames built to exact joint angles — so the rules are tested against

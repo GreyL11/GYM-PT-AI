@@ -20,6 +20,17 @@ export function suggest(exId) {
   };
 }
 
+/**
+ * Snap a prescribed weight to something the bar can actually be loaded to.
+ *
+ * Raising the increment is not enough on its own: a load already off the grid — carried over from
+ * before the gym's plates were set, or restored from an old backup — stays off it forever if you
+ * only ever add a clean 5 kg to it. Every weight that gets written has to land on the grid, not
+ * just every step between them. Deloads too, since 10% off is an arbitrary number.
+ */
+const loadable = (exId, kg) =>
+  (EXERCISES[exId].equipment === 'barbell' ? planner.achievableLoad(kg) : kg);
+
 const CUE_COOLDOWN_MS = 6000;      // same fault will not be repeated inside this window
 const SPEECH_GAP_MS = 1200;        // never talk over yourself
 const CLEAN_FAULTS_PER_REP = 0.34; // above this, the set was not clean enough to add weight
@@ -197,10 +208,13 @@ export function createCoach({ speak }) {
         // Nothing to add weight to on a push-up, so the rep target goes up instead.
         return bodyweight
           ? { moved: true, reps: true, from: reps, to: reps + 1, reason: 'all reps clean' }
-          : { moved: true, from: load, to: load + increment, reason: 'all reps clean' };
+          : { moved: true, from: load, to: loadable(exId, load + increment), reason: 'all reps clean' };
       }
       if (!bodyweight && insights.shouldDeload(exId)) {
-        return { moved: true, deload: true, from: load, to: insights.deloadTo(load), reason: 'stalled three sessions' };
+        return {
+          moved: true, deload: true, from: load,
+          to: loadable(exId, insights.deloadTo(load)), reason: 'stalled three sessions',
+        };
       }
       return {
         moved: false, reps: bodyweight, from: bodyweight ? reps : load, to: bodyweight ? reps : load,

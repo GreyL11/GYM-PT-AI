@@ -77,6 +77,58 @@ check('an injury removes every lift that aggravates it', () => {
   for (const id of ['deadlift', 'rdl', 'row', 'squat']) assert.ok(!back.includes(id), id);
 });
 
+check('the bar is loaded biggest plates first, from what the gym actually has', () => {
+  const p = P();  // 20 kg bar, 25/20/15/10/5/2.5/1.25
+  assert.deepEqual(planner.loadout(60, p).perSide, [{ kg: 20, n: 1 }]);
+  assert.deepEqual(planner.loadout(62.5, p).perSide, [{ kg: 20, n: 1 }, { kg: 1.25, n: 1 }]);
+  assert.deepEqual(planner.loadout(140, p).perSide, [{ kg: 25, n: 2 }, { kg: 10, n: 1 }]);
+  assert.deepEqual(planner.loadout(20, p).perSide, [], 'the bar on its own is a real answer');
+
+  assert.match(planner.loadoutText(62.5, p), /Bar \+ 20 \+ 1\.25 per side/);
+  assert.match(planner.loadoutText(20, p), /Empty bar/);
+  assert.match(planner.loadoutText(15, p), /Less than the 20 kg bar/);
+});
+
+check('a gym without small plates cannot make small weights, and is not told otherwise', () => {
+  // Plenty of gyms stop at 2.5 kg. Two per side is the smallest change, so 62.5 does not exist.
+  const coarse = P({ plates: [25, 20, 15, 10, 5, 2.5] });
+  assert.equal(planner.barbellStep(coarse), 5);
+  assert.equal(planner.achievableLoad(62.5, coarse), 65, 'snapped to something loadable');
+  assert.equal(planner.achievableLoad(61, coarse), 60);
+  assert.ok(planner.loadout(62.5, coarse).exact === false, 'and asking for it is flagged, not faked');
+  assert.equal(planner.loadout(62.5, coarse).actual, 60, 'you would really end up here');
+
+  // With 1.25s the same gym can make it.
+  assert.equal(planner.barbellStep(P()), 2.5);
+  assert.equal(planner.achievableLoad(62.5, P()), 62.5);
+});
+
+check('progression never prescribes a weight the bar cannot be loaded to', () => {
+  const coarse = P({ plates: [25, 20, 15, 10, 5, 2.5] });
+  // A barbell lift must step by at least 5 here, not the usual 2.5.
+  assert.equal(planner.increment('bench', coarse), 5);
+  assert.equal(planner.increment('squat', coarse), 5);
+  // Dumbbells and cables are not loaded from your plate rack, so they keep their own steps.
+  assert.equal(planner.increment('hammerCurl', coarse), 2.5);
+  assert.equal(planner.increment('pushdown', coarse), 2.5);
+  assert.equal(planner.increment('bench', P()), 2.5, 'a gym with 1.25s keeps the finer jump');
+
+  // Every barbell starting load is loadable on that bar.
+  for (const id of Object.keys(EXERCISES).filter((k) => EXERCISES[k].equipment === 'barbell')) {
+    const load = planner.startingLoad(id, coarse);
+    assert.ok(planner.loadout(load, coarse).exact, `${id} starts at an unloadable ${load} kg`);
+  }
+});
+
+check('a profile saved before plates existed still gets numbers, not NaN', () => {
+  const old = { bodyweight: 80, trainingAge: 'beginner', goal: 'hypertrophy', daysPerWeek: 3,
+    equipment: ['barbell'], injuries: [] };
+  assert.equal(planner.barbellStep(old), 2.5);
+  assert.ok(Number.isFinite(planner.achievableLoad(62.5, old)));
+  assert.ok(Number.isFinite(planner.startingLoad('bench', old)));
+  assert.equal(planner.loadout(60, old).bar, 20);
+});
+
 check('the goal drives the rep scheme, compounds and isolation separately', () => {
   assert.deepEqual(planner.scheme('squat', P({ goal: 'strength' })), { sets: 5, reps: 5 });
   assert.deepEqual(planner.scheme('squat', P({ goal: 'hypertrophy' })), { sets: 4, reps: 8 });

@@ -26,10 +26,12 @@ const el = {
   profile: $('sheet-profile'), inBw: $('in-bw'), inDays: $('in-days'),
   pExperience: $('p-experience'), pGoal: $('p-goal'), pEquipment: $('p-equipment'),
   pInjuries: $('p-injuries'), profileWarn: $('profile-warn'),
+  inBar: $('in-bar'), pPlates: $('p-plates'), plateNote: $('plate-note'),
   btnSaveProfile: $('btn-save-profile'), btnProfileBack: $('btn-profile-back'),
   btnExportFile: $('btn-export-file'), btnExportCopy: $('btn-export-copy'), backupMsg: $('backup-msg'),
   restoreText: $('restore-text'), btnRestore: $('btn-restore'), restoreErr: $('restore-err'),
   setup: $('sheet-setup'), setupEx: $('setup-ex'), setupHint: $('setup-hint'), setupLast: $('setup-last'),
+  setupPlates: $('setup-plates'),
   howto: $('howto'), howtoBody: $('howto-body'), btnHowto: $('btn-howto'), btnHowtoSpeak: $('btn-howto-speak'),
   inSets: $('in-sets'), inReps: $('in-reps'), inLoad: $('in-load'),
   btnBack: $('btn-back'), btnStart: $('btn-start'), startErr: $('start-err'),
@@ -795,10 +797,21 @@ function showProfile() {
       };
     }
   }
+  el.inBar.value = draft.bar;
   wireChips(el.pEquipment, EQUIPMENT, [...draft.equipment], (v) => { draft.equipment = v; checkProfile(); });
   wireChips(el.pInjuries, INJURIES, [...draft.injuries], (v) => { draft.injuries = v; checkProfile(); });
+  // Chip values come back as strings; plates are arithmetic, so they go back to numbers here.
+  wireChips(el.pPlates, PLATE_SIZES, draft.plates.map(String), (v) => {
+    draft.plates = v.map(Number).sort((a, b) => b - a);
+    checkProfile();
+  });
   checkProfile();
 }
+
+/** Every plate size a gym might stock, largest first. */
+const PLATE_SIZES = [25, 20, 15, 10, 5, 2.5, 1.25];
+/** Deselecting every plate would leave a bar that can only ever be its own weight. */
+const DEFAULT_PLATES = planner.DEFAULT_PROFILE.plates;
 
 /** Equipment and injuries can between them leave a muscle group with nothing to train. */
 function checkProfile() {
@@ -807,6 +820,13 @@ function checkProfile() {
   el.profileWarn.textContent = !usable.length
     ? 'That leaves no exercises at all. Add some equipment.'
     : empty.length ? `Nothing left for: ${empty.join(', ')}. Those days will be shorter.` : '';
+
+  // Plates go on in pairs, so the smallest jump you can make is twice your smallest plate — and
+  // that, not a preference, is what decides how finely the app is allowed to add weight.
+  const bar = Number(el.inBar.value) || draft.bar;
+  el.plateNote.textContent = draft.plates.length
+    ? `Smallest jump: ${planner.barbellStep({ ...draft, bar })} kg. ${planner.loadoutText(bar + planner.barbellStep({ ...draft, bar }), { ...draft, bar })}.`
+    : 'Pick at least one plate, or nothing can go on the bar.';
 }
 
 function showSetup(exId, prefill = null) {
@@ -875,6 +895,29 @@ el.btnHowtoSpeak.addEventListener('click', () => {
 function syncWarmupRow() {
   const eligible = pendingEx && warmupsFor(pendingEx, Number(el.inLoad.value) || 0).length > 0;
   el.warmupRow.hidden = !eligible;
+  syncPlates();
+}
+
+/**
+ * What to hang on the bar for the weight currently dialled in.
+ *
+ * Barbells only: a cable stack is a pin position and dumbbells come as they come, so showing
+ * plate maths for those would be inventing an answer. If the weight cannot be built from the
+ * plates this gym has, say so and name what you would really end up with — that is the whole
+ * reason this exists.
+ */
+function syncPlates() {
+  const ex = pendingEx && EXERCISES[pendingEx];
+  const load = Number(el.inLoad.value) || 0;
+  if (!ex || ex.equipment !== 'barbell' || !load) { el.setupPlates.hidden = true; return; }
+
+  const l = planner.loadout(load, planner.getProfile());
+  el.setupPlates.hidden = false;
+  el.setupPlates.textContent = planner.loadoutText(load, planner.getProfile());
+  if (!l.exact) {
+    el.setupPlates.append(node('span', 'warn',
+      `Your plates cannot make ${load} kg — that is ${l.actual} kg.`));
+  }
 }
 
 // ── HUD ──────────────────────────────────────────────────────────────────────────────────
@@ -1177,6 +1220,8 @@ el.btnSaveProfile.addEventListener('click', () => {
     name: el.inName.value.trim(),
     bodyweight,
     daysPerWeek: Number(el.inDays.value) || draft.daysPerWeek,
+    bar: Number(el.inBar.value) || draft.bar,
+    plates: draft.plates.length ? draft.plates : DEFAULT_PLATES,
   });
   // Weighing yourself IS editing this field, so there is no second place to log it. One point per
   // day, so opening the profile to change something else does not fake a weigh-in.
@@ -1228,6 +1273,12 @@ let lastSet = null;   // so the ± correction can re-describe the set it just am
 
 function describeSet(r, verdict) {
   const bits = [`${r.faults} corrections.`];
+  // Warm-up ramps change the bar every set, so the loading for what is coming next belongs here,
+  // on the screen you are looking at while you strip plates off.
+  const next = coach.state;
+  if (!next.idle && !r.done && EXERCISES[next.exId]?.equipment === 'barbell' && next.load) {
+    bits.push(`Next: ${planner.loadoutText(next.load, planner.getProfile()).toLowerCase()}.`);
+  }
   if (r.slowdown > 1.25) bits.push(`Reps slowed ${Math.round((r.slowdown - 1) * 100)}% by the end.`);
   if (verdict) {
     const unit = verdict.reps ? 'reps' : 'kg';

@@ -69,6 +69,18 @@ The file download is the one you want, but a Capacitor WebView with no `Download
 blob downloads silently, so **Copy** is there as the path that works everywhere. If nothing lands
 in your downloads, use it.
 
+## Loading the bar
+
+The setup screen shows what to hang on each end — `Bar + 20 + 1.25 per side` — so you are not doing
+`(62.5 − 20) ÷ 2` in your head twenty times a session. It appears for barbell lifts only; a cable
+stack is a pin position and dumbbells come as they come.
+
+Tell it your bar and which plates your gym stocks in **Profile**. This matters more than it sounds:
+plates go on in pairs, so the smallest change you can make is *twice* your smallest plate. A gym
+whose smallest plate is 2.5 kg cannot make 62.5 kg at all — and rather than prescribing it anyway,
+progression now steps in 5s there and every weight it suggests is one the bar can actually be
+loaded to. If you dial in something impossible by hand, it says what you would really end up with.
+
 ## Adjust — read this before deciding it's wrong
 
 **Adjust** exposes the raw thresholds per lift. Your limb proportions, squat depth and camera tilt

@@ -13,6 +13,7 @@ globalThis.localStorage = {
 
 const { createCoach, warmupsFor } = await import('./www/coach.js');
 const store = await import('./www/store.js');
+const planner = await import('./www/planner.js');
 
 const said = [];
 const newCoach = () => { said.length = 0; return createCoach({ speak: (t) => said.push(t) }); };
@@ -122,6 +123,24 @@ check('a messy set holds the weight even when every rep was hit', () => {
   assert.equal(r.verdict.reason, 'form broke down');
   coach.finishExercise();
   assert.equal(store.getLoad('squat', 0), 100);
+});
+
+check('progression only ever lands on weights the bar can be loaded to', () => {
+  // A gym with no 1.25 kg plates: every barbell weight is a multiple of 5 above the 20 kg bar.
+  planner.setProfile({ plates: [25, 20, 15, 10, 5, 2.5] });
+
+  // A load carried over from before those plates were set is already off the grid. Adding a clean
+  // increment to it would keep it off the grid forever, so the result has to be snapped, not just
+  // the step.
+  const coach = newCoach();
+  coach.select('bench', { sets: 1, reps: 5, load: 47.5, warmup: false });
+  coach.endSet(setDone(5));
+  const v = coach.preview();
+  assert.ok(v.moved, 'clean set should add weight');
+  assert.equal((v.to - 20) % 5, 0, `${v.to} kg cannot be loaded on this bar`);
+  assert.ok(v.to > 47.5, 'and it still goes up');
+
+  planner.setProfile({ plates: planner.DEFAULT_PROFILE.plates });
 });
 
 check('three sessions stuck triggers the deload through the coach', () => {
