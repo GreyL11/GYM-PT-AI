@@ -8,7 +8,7 @@ const CACHE = 'gym-trainer-v1';
 const SHELL = [
   './', 'index.html', 'manifest.json', 'icon.svg',
   'app.js', 'pose.js', 'coach.js', 'exercises.js', 'store.js',
-  'insights.js', 'planner.js', 'nutrition.js', 'technique.js',
+  'insights.js', 'planner.js', 'nutrition.js', 'technique.js', 'filter.js',
 ];
 
 self.addEventListener('install', (e) => {

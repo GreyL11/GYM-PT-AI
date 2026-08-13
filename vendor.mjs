@@ -27,7 +27,14 @@ async function get(url, init, tries = 3) {
     await new Promise((r) => setTimeout(r, i * 2000));
   }
 }
-const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task';
+// Both models ship: `lite` is the default, `full` is there for phones fast enough to run it and is
+// noticeably better when one limb occludes the other. Which is right is measured on the device,
+// not decided here — so both have to be in the APK.
+const MODEL_BASE = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker';
+const MODELS = ['lite', 'full'].map((v) => ({
+  file: `pose_landmarker_${v}.task`,
+  url: `${MODEL_BASE}/pose_landmarker_${v}/float16/1/pose_landmarker_${v}.task`,
+}));
 
 // Google Fonts serves woff2 only to browser user agents; node's default UA gets ttf.
 const FONT_CSS = 'https://fonts.googleapis.com/css2?family=Inter:wght@500;700;800;900&family=JetBrains+Mono:wght@700&display=swap';
@@ -37,13 +44,15 @@ mkdirSync(OUT, { recursive: true });
 cpSync(join(SRC, 'wasm'), join(OUT, 'wasm'), { recursive: true });
 copyFileSync(join(SRC, 'vision_bundle.mjs'), join(OUT, 'tasks-vision.mjs'));
 
-const model = join(OUT, 'pose_landmarker_lite.task');
-if (existsSync(model)) {
-  console.log('vendor: wasm + bundle refreshed, model already present');
-} else {
-  const res = await get(MODEL_URL);
-  writeFileSync(model, Buffer.from(await res.arrayBuffer()));
-  console.log('vendor: wasm + bundle refreshed, model downloaded');
+for (const m of MODELS) {
+  const path = join(OUT, m.file);
+  if (existsSync(path)) {
+    console.log(`vendor: ${m.file} already present`);
+    continue;
+  }
+  const res = await get(m.url);
+  writeFileSync(path, Buffer.from(await res.arrayBuffer()));
+  console.log(`vendor: ${m.file} downloaded`);
 }
 
 // ── webfonts ─────────────────────────────────────────────────────────────────────────────

@@ -771,12 +771,53 @@ export function createState() {
     faultCounts: {},  // total times each fault fired this set — feeds progression
     repMs: [],        // duration of each completed rep; late reps slowing down is fatigue
     rejected: 0,      // movements too fast to be reps — kit being moved around, not lifting
+    side: null,       // locked at the first visible frame; see step()
+    sideLost: 0,
   };
 }
 
-const EMA_ALPHA = 0.4;   // heavier = twitchier. 0.4 kills MediaPipe jitter without lagging a fast rep.
+/** Is the camera actually where this lift needs it? See cameraCheck(). */
+export const VIEW_OK = { side: 0.42, front: 0.55 };
+
+/**
+ * Judge the camera angle from the lifter's own shoulders.
+ *
+ * Filmed side-on, the two shoulders sit almost on top of each other in the image; filmed front-on
+ * they are as far apart as the lifter is wide. Comparing that spread against torso height gives a
+ * scale-free read on which way the phone is pointing, so a lift that needs a side view can say so
+ * before the set rather than quietly measuring distorted angles for all of it.
+ *
+ * @returns {{spread:number, view:'side'|'front', ok:boolean}|null}
+ */
+export function cameraCheck(lm, wanted) {
+  const ls = lm?.[IDX.left.shoulder], rs = lm?.[IDX.right.shoulder];
+  const lh = lm?.[IDX.left.hip], rh = lm?.[IDX.right.hip];
+  if (!ls || !rs || !lh || !rh) return null;
+  if (Math.min(ls.visibility ?? 0, rs.visibility ?? 0) < 0.4) return null;
+
+  const midShoulderY = (ls.y + rs.y) / 2;
+  const midHipY = (lh.y + rh.y) / 2;
+  const torso = Math.abs(midHipY - midShoulderY);
+  if (torso < 1e-3) return null;
+
+  const spread = Math.abs(ls.x - rs.x) / torso;
+  const view = spread < VIEW_OK.side ? 'side' : 'front';
+  const ok = wanted === 'side' ? spread < VIEW_OK.front : spread > VIEW_OK.side;
+  return { spread, view, ok };
+}
+
+// Landmarks arrive already One-Euro filtered (filter.js), so this second pass on the primary angle
+// is light — just enough to settle the last of the angle-space noise without adding lag.
+const EMA_ALPHA = 0.6;
 const HYSTERESIS = 12;   // deg of slop around each rep endpoint, so noise cannot double-count
 const HOLD_FRAMES = 3;   // a fault must survive this many frames before it is spoken
+
+/** A joint the tracker is less sure than this about does not get to trigger a correction. */
+const MIN_JOINT_VIS = 0.5;
+
+// The tracked side is locked for the set; these decide when it has genuinely been lost.
+const SIDE_LOST_VIS = 0.35;
+const SIDE_LOST_FRAMES = 15;
 
 /**
  * Below this, a completed "rep" was not a rep.
@@ -803,7 +844,22 @@ export function step(exId, frame, st, T) {
   const { lm, w, tMs } = frame;
   const view = frame.view ?? ex.view;
 
-  const side = bestSide(lm, ex.needs);
+  // Which side we track is decided ONCE per set, not per frame.
+  //
+  // Filmed side-on, your near and far limbs overlap and MediaPipe's per-side visibility scores
+  // flicker between them. Re-picking every frame meant the tracked side could swap mid-rep, and the
+  // measured angle jumps with it — which reads as a sudden fault. Re-pick only if the chosen side
+  // genuinely disappears for a sustained stretch, e.g. you turned around.
+  st.side ??= bestSide(lm, ex.needs);
+  const held = ex.needs.reduce((s, k) => s + (lm[IDX[st.side][k]]?.visibility ?? 0), 0) / ex.needs.length;
+  if (held < SIDE_LOST_VIS) {
+    st.sideLost = (st.sideLost ?? 0) + 1;
+    if (st.sideLost > SIDE_LOST_FRAMES) { st.side = bestSide(lm, ex.needs); st.sideLost = 0; }
+  } else {
+    st.sideLost = 0;
+  }
+
+  const side = st.side;
   const P = pick(lm, IDX[side]);
   const W = pick(w, IDX[side]);
 
@@ -857,15 +913,41 @@ export function step(exId, frame, st, T) {
   }
 
   // ── fault evaluation ───────────────────────────────────────────────────────────────────
+  //
+  // Visibility is checked per CHECK, not per exercise. The gate above only asks whether the lift's
+  // core joints are visible enough to bother analysing at all; it would then happily run a
+  // wrist-stacking test off a wrist the tracker is 51% sure about. Each rule instead abstains on
+  // the joints it personally reads — discovered by watching which ones it touches, so the 60-odd
+  // rules need no annotation and cannot drift out of sync with what they actually use.
   const faults = [];
   for (const f of ex.faults) {
     const phaseOk = f.phase === 'any' || f.phase === st.phase;
     const viewOk = !f.view || f.view === view;
     const sidesOk = !f.bothSides || ['left', 'right'].every(
-      (s) => (lm[IDX[s].elbow]?.visibility ?? 0) >= 0.5,
+      (s) => (lm[IDX[s].elbow]?.visibility ?? 0) >= MIN_JOINT_VIS,
     );
 
-    if (!phaseOk || !viewOk || !sidesOk || !f.test(ctx)) {
+    if (!phaseOk || !viewOk || !sidesOk) {
+      st.faultFrames[f.id] = 0;
+      continue;
+    }
+
+    const touched = new Set();
+    const watch = (obj) => new Proxy(obj, {
+      get: (t, k) => { if (typeof k === 'string') touched.add(k); return t[k]; },
+    });
+    const wP = watch(P);
+    const wW = watch(W);
+    const watchedJoints = {
+      knee: () => angle(wW.hip, wW.knee, wW.ankle),
+      elbow: () => angle(wW.shoulder, wW.elbow, wW.wrist),
+      hip: () => angle(wW.shoulder, wW.hip, wW.knee),
+      shoulder: () => angle(wW.hip, wW.shoulder, wW.elbow),
+    };
+    const fired = f.test({ ...ctx, P: wP, W: wW, jointAngle: (j) => watchedJoints[j]() });
+    const confident = [...touched].every((k) => (P[k]?.visibility ?? 1) >= MIN_JOINT_VIS);
+
+    if (!fired || !confident) {
       st.faultFrames[f.id] = 0;
       continue;
     }

@@ -6,7 +6,8 @@
 
 import assert from 'node:assert/strict';
 import {
-  EXERCISES, GROUPS, byGroup, defaultThresholds, createState, step, calibrate, angle, torsoLean, IDX,
+  EXERCISES, GROUPS, byGroup, defaultThresholds, createState, step, calibrate, cameraCheck,
+  angle, torsoLean, IDX,
 } from './www/exercises.js';
 
 const rad = (d) => (d * Math.PI) / 180;
@@ -312,6 +313,85 @@ check('overhead extension holds the upper arms overhead, the skullcrusher holds 
   assert.ok(run('overheadExtension', vertical).faults.includes('upperArm'));
   assert.ok(!run('skullcrusher', vertical).faults.includes('upperArm'));
   assert.ok(run('skullcrusher', overhead).faults.includes('upperArm'));
+});
+
+// ── camera angle and side locking ────────────────────────────────────────────────────────
+
+/** Dim one side, as happens when it is hidden behind the other. */
+function dim(lm, side, visibility) {
+  const out = lm.map((p) => ({ ...p }));
+  for (const i of Object.values(IDX[side])) out[i].visibility = visibility;
+  return out;
+}
+
+check('the camera check tells side-on from front-on by shoulder spread', () => {
+  const sideOn = cameraCheck(body({ spread: 0.04 }), 'side');
+  assert.equal(sideOn.view, 'side');
+  assert.equal(sideOn.ok, true, 'a side-on lift filmed side-on is fine');
+
+  const frontOn = cameraCheck(body({ spread: 0.12 }), 'side');
+  assert.equal(frontOn.view, 'front');
+  assert.equal(frontOn.ok, false, 'a side-on lift filmed from the front is not');
+
+  assert.equal(cameraCheck(body({ spread: 0.12 }), 'front').ok, true);
+  assert.equal(cameraCheck(body({ spread: 0.04 }), 'front').ok, false);
+});
+
+check('the camera check abstains rather than guessing', () => {
+  assert.equal(cameraCheck(null, 'side'), null);
+  assert.equal(cameraCheck(dim(body(), 'left', 0.1).map((p, i) => (
+    i === IDX.right.shoulder ? { ...p, visibility: 0.1 } : p
+  )), 'side'), null, 'cannot judge the angle without seeing both shoulders');
+});
+
+check('the tracked side is locked for the set, not re-picked every frame', () => {
+  const st = createState();
+  const T = defaultThresholds('squat');
+  const frame = (lm, i) => step('squat', { lm, w: lm, tMs: i * 100 }, st, T);
+
+  // Start with the left side clearly the visible one.
+  for (let i = 0; i < 5; i += 1) frame(dim(body({ kneeAngle: 165 }), 'right', 0.6), i);
+  assert.equal(st.side, 'left');
+
+  // Now the right side scores higher — the old code would have swapped mid-rep, and the measured
+  // angle would jump with it. The left side is still perfectly visible, so it must be kept.
+  for (let i = 5; i < 20; i += 1) frame(dim(body({ kneeAngle: 120 }), 'left', 0.6), i);
+  assert.equal(st.side, 'left', 'must not flip while the locked side is still visible');
+});
+
+check('but a side that genuinely disappears is given up on', () => {
+  const st = createState();
+  const T = defaultThresholds('squat');
+  for (let i = 0; i < 5; i += 1) {
+    step('squat', { lm: dim(body(), 'right', 0.6), w: body(), tMs: i * 100 }, st, T);
+  }
+  assert.equal(st.side, 'left');
+
+  // Turned around: the left side is now genuinely gone, not merely lower-scoring.
+  for (let i = 5; i < 30; i += 1) {
+    const lm = dim(body(), 'left', 0.05);
+    step('squat', { lm, w: lm, tMs: i * 100 }, st, T);
+  }
+  assert.equal(st.side, 'right', 'a sustained loss should re-pick');
+});
+
+check('a check abstains when the joints IT reads are poorly tracked', () => {
+  const T = defaultThresholds('bench');
+  // Wrists barely tracked, everything else fine. The wrist-stacking rule must stay quiet even
+  // though the exercise-level gate passes on shoulder/elbow/hip.
+  const bent = () => {
+    const lm = body({ elbowAngle: 90, shoulderAngle: 88, wristAngle: 120 });
+    for (const side of ['left', 'right']) {
+      lm[IDX[side].wrist] = { ...lm[IDX[side].wrist], visibility: 0.45 };
+      lm[IDX[side].index] = { ...lm[IDX[side].index], visibility: 0.45 };
+    }
+    return lm;
+  };
+  assert.ok(!run('bench', hold(6, bent)).faults.includes('wrist'), 'unreliable wrist, no wrist cue');
+
+  // Same pose, wrists tracked properly — now it should speak up.
+  const seen = () => body({ elbowAngle: 90, shoulderAngle: 88, wristAngle: 120 });
+  assert.ok(run('bench', hold(6, seen)).faults.includes('wrist'));
 });
 
 // ── calibration ──────────────────────────────────────────────────────────────────────────

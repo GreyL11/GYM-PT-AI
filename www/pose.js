@@ -5,14 +5,25 @@
 import { FilesetResolver, PoseLandmarker } from './vendor/tasks-vision.mjs';
 
 const WASM = './vendor/wasm';
-const MODEL = './vendor/pose_landmarker_lite.task';
 
-// ponytail: the "lite" model. On a mid-range phone it holds 30fps where "full" drops to ~12,
-// and joint-angle thresholds are far coarser than the accuracy difference between them.
-export async function createLandmarker() {
+/**
+ * Two models, and which one is right is a question about YOUR phone, not about pose estimation.
+ *
+ * `full` is meaningfully better at the case this app actually has — filmed side-on, with one arm
+ * and leg occluding the other — but costs inference time. Whether that drops you below a usable
+ * frame rate depends entirely on the device, so the app measures its own FPS and lets you switch,
+ * rather than shipping a guess. (It previously shipped my guess: a comment claiming full ran at
+ * ~12fps on a mid-range phone, which was never measured on anything.)
+ */
+export const MODELS = {
+  lite: { file: './vendor/pose_landmarker_lite.task', label: 'Lite — fastest' },
+  full: { file: './vendor/pose_landmarker_full.task', label: 'Full — more accurate' },
+};
+
+export async function createLandmarker(model = 'lite') {
   const fileset = await FilesetResolver.forVisionTasks(WASM);
   return PoseLandmarker.createFromOptions(fileset, {
-    baseOptions: { modelAssetPath: MODEL, delegate: 'GPU' },
+    baseOptions: { modelAssetPath: (MODELS[model] ?? MODELS.lite).file, delegate: 'GPU' },
     runningMode: 'VIDEO',
     numPoses: 1,
     minPoseDetectionConfidence: 0.5,

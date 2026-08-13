@@ -5,7 +5,12 @@ const KEY = 'gym-trainer/v1';
 
 const blank = {
   loads: {}, thresholds: {}, log: [], profile: null, reps: {}, meals: [], foods: {}, weights: [],
+  // Device settings, as opposed to training ones: which pose model this phone can afford to run.
+  settings: {},
 };
+
+export const getSetting = (key, fallback) => read().settings[key] ?? fallback;
+export const setSetting = (key, value) => write({ settings: { ...read().settings, [key]: value } });
 
 export function read() {
   try {

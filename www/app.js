@@ -1,7 +1,8 @@
-import { createLandmarker, startCamera, stopCamera, drawSkeleton } from './pose.js';
+import { createLandmarker, startCamera, stopCamera, drawSkeleton, MODELS } from './pose.js';
+import { createLandmarkFilter } from './filter.js';
 import {
   EXERCISES, GROUPS, EQUIPMENT, INJURIES, MIN_RANGE_DEG,
-  defaultThresholds, createState, step, calibrate,
+  defaultThresholds, createState, step, calibrate, cameraCheck,
 } from './exercises.js';
 import { createCoach, createVoice, suggest, warmupsFor } from './coach.js';
 import * as insights from './insights.js';
@@ -26,6 +27,7 @@ const el = {
   profile: $('sheet-profile'), inBw: $('in-bw'), inDays: $('in-days'),
   pExperience: $('p-experience'), pGoal: $('p-goal'), pEquipment: $('p-equipment'),
   pInjuries: $('p-injuries'), profileWarn: $('profile-warn'),
+  pModel: $('p-model'), modelNote: $('model-note'),
   inBar: $('in-bar'), pPlates: $('p-plates'), plateNote: $('plate-note'),
   btnSaveProfile: $('btn-save-profile'), btnProfileBack: $('btn-profile-back'),
   btnExportFile: $('btn-export-file'), btnExportCopy: $('btn-export-copy'), backupMsg: $('backup-msg'),
@@ -92,7 +94,16 @@ const RANGES = {
 const voice = createVoice();
 const coach = createCoach({ speak: (t) => voice.speak(t) });
 
+// Landmarks are smoothed before ANY measurement reads them, so fault checks stop working off raw
+// jitter. Two filters because the two coordinate spaces have different plausible speeds.
+const lmFilter = createLandmarkFilter('normalized');
+const wFilter = createLandmarkFilter('world');
+
+let fps = 0;          // measured, and shown, because the model choice depends on it
+let lastFrameAt = 0;
+
 let landmarker = null;
+let landmarkerModel = null;   // which model is currently loaded
 let stream = null;
 let setState = createState();
 let thresholds = {};
@@ -800,6 +811,13 @@ function showProfile() {
   el.inBar.value = draft.bar;
   wireChips(el.pEquipment, EQUIPMENT, [...draft.equipment], (v) => { draft.equipment = v; checkProfile(); });
   wireChips(el.pInjuries, INJURIES, [...draft.injuries], (v) => { draft.injuries = v; checkProfile(); });
+
+  // Which model this phone can afford is a measurement, not an opinion — so show the number.
+  wireChips(el.pModel, Object.keys(MODELS), store.getSetting('model', 'lite'), (v) => {
+    store.setSetting('model', v);
+    describeModel();
+  });
+  describeModel();
   // Chip values come back as strings; plates are arithmetic, so they go back to numbers here.
   wireChips(el.pPlates, PLATE_SIZES, draft.plates.map(String), (v) => {
     draft.plates = v.map(Number).sort((a, b) => b - a);
@@ -812,6 +830,20 @@ function showProfile() {
 const PLATE_SIZES = [25, 20, 15, 10, 5, 2.5, 1.25];
 /** Deselecting every plate would leave a bar that can only ever be its own weight. */
 const DEFAULT_PLATES = planner.DEFAULT_PROFILE.plates;
+
+/** Report the last measured frame rate, so the model choice is made against evidence. */
+function describeModel() {
+  const chosen = store.getSetting('model', 'lite');
+  const measured = store.getSetting(`fps.${chosen}`, null);
+  const parts = [MODELS[chosen].label];
+  if (measured) {
+    parts.push(`${measured} fps measured on this phone`);
+    if (measured < 18) parts.push('below 20 is too slow to catch a fast rep — switch back to Lite');
+  } else {
+    parts.push('train one set to measure it');
+  }
+  el.modelNote.textContent = parts.join(' · ');
+}
 
 /** Equipment and injuries can between them leave a muscle group with nothing to train. */
 function checkProfile() {
@@ -960,6 +992,20 @@ function checkVoice() {
 // ── the frame loop ───────────────────────────────────────────────────────────────────────
 
 /**
+ * Wait for the next CAMERA frame, not the next screen repaint.
+ *
+ * requestAnimationFrame fires on the display's cadence, which has nothing to do with the camera's:
+ * at 60Hz against a 30fps stream, half the callbacks had no new frame to analyse and were thrown
+ * away by the currentTime check, and the timestamps we recorded were repaint times rather than
+ * capture times. Rep tempo and the fatigue measurement are built on those timestamps.
+ */
+function nextFrame(cb) {
+  const v = el.cam;
+  if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(() => cb());
+  else requestAnimationFrame(cb);
+}
+
+/**
  * @param {number} gen  the generation this loop belongs to. `running` alone was not enough: it is
  *   only observed on the NEXT animation frame, so leaving the camera and starting another lift
  *   quickly left the old loop's pending callback alive to see `running === true` again and keep
@@ -978,7 +1024,7 @@ function loop(gen) {
     el.status.textContent = 'Stopped';
     return;
   }
-  requestAnimationFrame(() => loop(gen));
+  nextFrame(() => loop(gen));
 }
 
 function frame() {
@@ -990,9 +1036,15 @@ function frame() {
       el.overlay.height = v.videoHeight;
     }
     const tMs = performance.now();
+    if (lastFrameAt) {
+      const dt = tMs - lastFrameAt;
+      if (dt > 0 && dt < 500) fps += 0.1 * (1000 / dt - fps);
+    }
+    lastFrameAt = tMs;
+
     const res = landmarker.detectForVideo(v, tMs);
-    const lm = res.landmarks?.[0];
-    const w = res.worldLandmarks?.[0];
+    const lm = lmFilter.apply(res.landmarks?.[0], tMs);
+    const w = wFilter.apply(res.worldLandmarks?.[0], tMs);
 
     if (lm && w) {
       // Framing and calibration run the same analysis but bank nothing into the real set.
@@ -1001,7 +1053,7 @@ function frame() {
         live ? setState : scratch, thresholds);
 
       if (mode === 'calibrating') onCalibrationFrame(out, tMs);
-      else if (mode === 'framing') onFramingFrame(out);
+      else if (mode === 'framing') onFramingFrame(out, lm);
       else if (live) {
         const cue = coach.onFrame(out);
         if (cue) { showCue(cue); buzz([70, 60, 70]); }
@@ -1009,7 +1061,9 @@ function frame() {
         checkVoice();
       }
 
-      el.status.textContent = out.visible ? `${Math.round(out.angle)}° · ${out.phase}` : 'Step back into frame';
+      el.status.textContent = out.visible
+        ? `${Math.round(out.angle)}° · ${out.phase} · ${Math.round(fps)}fps`
+        : 'Step back into frame';
       drawSkeleton(el.overlay.getContext('2d'), lm, {
         width: el.overlay.width, height: el.overlay.height, bad: live && out.faults.length > 0,
       });
@@ -1023,12 +1077,25 @@ function frame() {
 
 // ── framing: do not start counting while the lifter walks to the bar ─────────────────────
 
-function onFramingFrame(out) {
+function onFramingFrame(out, lm) {
   if (!out.visible) {
     resetFraming();
     big('Step back', 'I need to see all of you in frame');
     return;
   }
+
+  // Catch the setup mistake that silently distorts every angle for the whole set. A lift measured
+  // from the wrong side is not slightly wrong, it is measuring a different plane.
+  const cam = cameraCheck(lm, view);
+  if (cam && !cam.ok) {
+    resetFraming();
+    big(view === 'side' ? 'Turn side-on' : 'Face the camera',
+      view === 'side'
+        ? 'This lift is measured from the side — put the phone level with your hip'
+        : 'This lift needs a front-on view');
+    return;
+  }
+
   if (out.phase !== 'start') {
     resetFraming();
     big('Get set', 'Stand in the starting position');
@@ -1129,9 +1196,14 @@ function beginSet() {
 
 /** Claim the loop. Any loop from a previous set sees a stale generation and retires itself. */
 function startLoop() {
+  // Filters carry per-landmark history. Starting a new set — possibly a different lift, from a
+  // different camera position — must not smooth against where the last one left off.
+  lmFilter.reset();
+  wFilter.reset();
+  lastFrameAt = 0;
   loopGen += 1;
   const gen = loopGen;
-  requestAnimationFrame(() => loop(gen));
+  nextFrame(() => loop(gen));
 }
 
 // ── buttons ──────────────────────────────────────────────────────────────────────────────
@@ -1159,7 +1231,13 @@ el.btnStart.addEventListener('click', async () => {
 async function ensureCamera() {
   voice.enabled = el.voice.checked;
   voice.unlock(); // must happen inside the gesture or iOS stays silent all session
-  if (!landmarker) { el.startErr.textContent = 'Loading pose model…'; landmarker = await createLandmarker(); }
+  const wanted = store.getSetting('model', 'lite');
+  if (!landmarker || landmarkerModel !== wanted) {
+    el.startErr.textContent = 'Loading pose model…';
+    landmarker?.close?.();   // the old one holds GPU memory; two loaded at once is asking for it
+    landmarker = await createLandmarker(wanted);
+    landmarkerModel = wanted;
+  }
   if (!stream) stream = await startCamera(el.cam, el.facing.dataset.value);
   el.startErr.textContent = '';
 }
@@ -1293,6 +1371,8 @@ el.btnEnd.addEventListener('click', () => {
   running = false;
   hideBig();
   lastSet = r;
+  // Remember what this model actually achieved on this phone, so the picker can show it.
+  if (fps > 1 && landmarkerModel) store.setSetting(`fps.${landmarkerModel}`, Math.round(fps));
   // Warm-ups are not logged, so there is nothing to correct on them.
   el.repfix.hidden = Boolean(r.warmup);
   el.restReps.textContent = String(r.record.reps);
