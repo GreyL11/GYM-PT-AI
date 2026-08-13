@@ -26,17 +26,20 @@
     --on-surface: #eceaf0;
     --on-surface-variant: #8f8f9c;
     --outline-variant: #2a2a31;
-    --neon: #39ff14;
-    --on-neon: #0a0a0a;
+    /* Two marks on near-black, taken from the icon: bone-white ink, one pink seal.
+       The app was running hi-vis green, mint and rose while the icon was bone and pink — three
+       palettes for one product. Sumi-e logic instead: the page is ink, and colour gets spent once,
+       on the thing to do next. */
+    --neon: #ff4d8d;          /* the accent: actions, focus, the live rep count */
+    --on-neon: #1a0010;
     --danger: #c5020c;
     --on-danger: #ffdad6;
 
-    /* Train is red, eat is green, and they stay that way everywhere. The dashboard leans on this
-       being the fastest thing on the screen to tell apart. */
-    --train: #f43f5e;
-    --on-train: #1a0006;
-    --eat: #7ee2a8;
-    --on-eat: #04170c;
+    /* Train is the accent, eat is the ink. Still instantly separable, without a third hue. */
+    --train: #ff4d8d;
+    --on-train: #1a0010;
+    --eat: #ede6da;
+    --on-eat: #14100a;
 
     --touch: 64px;
     --gutter: 16px;
@@ -92,7 +95,7 @@
   }
   #repnum {
     font: 900 84px/80px var(--mono); color: var(--neon); font-variant-numeric: tabular-nums;
-    text-shadow: 0 0 15px rgba(57, 255, 20, .4);
+    text-shadow: 0 0 15px rgba(255, 77, 141, .45);
   }
   #reptarget { margin-top: 8px; color: var(--on-surface-variant); letter-spacing: .18em; }
 
@@ -240,7 +243,7 @@
   .switch span { font: 700 16px/20px var(--mono); letter-spacing: .05em; text-transform: uppercase; }
   .switch input { appearance: none; margin: 0; width: 72px; height: 40px; border-radius: 999px;
     background: var(--sc-highest); position: relative; transition: background .15s; }
-  .switch input:checked { background: #1a3a10; box-shadow: 0 0 20px rgba(57, 255, 20, .2); }
+  .switch input:checked { background: #3a1024; box-shadow: 0 0 20px rgba(255, 77, 141, .25); }
   .switch input::after {
     content: ''; position: absolute; top: 4px; left: 4px; width: 32px; height: 32px;
     border-radius: 999px; background: var(--sc-bright, #6b6b6b); transition: transform .15s, background .15s;
@@ -280,7 +283,7 @@
   #sheet-rest .body { align-items: center; justify-content: center; text-align: center; }
   #resttime {
     font: 900 84px/80px var(--mono); color: var(--neon); font-variant-numeric: tabular-nums;
-    text-shadow: 0 0 24px rgba(57, 255, 20, .35);
+    text-shadow: 0 0 24px rgba(255, 77, 141, .35);
   }
   #restbar { width: 200px; height: 12px; background: var(--sc-highest); border-radius: 999px; overflow: hidden; }
   #restfill { height: 100%; width: 100%; background: var(--neon); transition: width 1s linear; }

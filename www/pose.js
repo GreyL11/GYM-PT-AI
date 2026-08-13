@@ -47,7 +47,7 @@ export function drawSkeleton(ctx, lm, { width, height, bad = false }) {
   const px = (p) => [p.x * width, p.y * height];
 
   ctx.lineWidth = 4;
-  ctx.strokeStyle = bad ? '#ff5a3c' : '#3ddc84';
+  ctx.strokeStyle = bad ? '#ff5a3c' : '#ede6da';
   ctx.beginPath();
   for (const [a, b] of CONNECTIONS) {
     if ((lm[a]?.visibility ?? 0) < 0.4 || (lm[b]?.visibility ?? 0) < 0.4) continue;
