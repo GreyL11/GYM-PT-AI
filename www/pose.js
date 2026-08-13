@@ -45,6 +45,21 @@ export function stopCamera(stream) {
   stream?.getTracks().forEach((t) => t.stop());
 }
 
+/**
+ * Is this stream still delivering pictures?
+ *
+ * Holding a MediaStream object proves nothing. Android ends or suspends the camera track when the
+ * app goes to the background, and the object stays exactly as it was — so code that checks
+ * `if (!stream)` happily reuses a dead one and the video element sits on its last frame forever.
+ *
+ * `muted` here is the track's own word for "live but no data flowing right now", which is what a
+ * backgrounded camera looks like the instant you come back.
+ */
+export function cameraAlive(stream) {
+  const track = stream?.getVideoTracks?.()[0];
+  return Boolean(track && track.readyState === 'live' && !track.muted);
+}
+
 const CONNECTIONS = [
   [11, 12], [11, 23], [12, 24], [23, 24],           // torso
   [11, 13], [13, 15], [12, 14], [14, 16],           // arms

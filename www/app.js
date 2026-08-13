@@ -1,4 +1,4 @@
-import { createLandmarker, startCamera, stopCamera, drawSkeleton, MODELS } from './pose.js';
+import { createLandmarker, startCamera, stopCamera, cameraAlive, drawSkeleton, MODELS } from './pose.js';
 import { createLandmarkFilter } from './filter.js';
 import {
   EXERCISES, GROUPS, EQUIPMENT, INJURIES, MIN_RANGE_DEG,
@@ -100,7 +100,8 @@ const lmFilter = createLandmarkFilter('normalized');
 const wFilter = createLandmarkFilter('world');
 
 let fps = 0;          // measured, and shown, because the model choice depends on it
-let lastFrameAt = 0;
+let lastFrameAt = 0;  // also the stall detector's only evidence that frames are arriving
+let reviving = false; // one recovery at a time; resume and the watchdog can fire together
 
 let landmarker = null;
 let landmarkerModel = null;   // which model is currently loaded
@@ -157,8 +158,50 @@ async function keepAwake() {
   try { wakeLock = await navigator.wakeLock?.request('screen'); } catch { /* not fatal */ }
 }
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && running) keepAwake();
+  if (document.visibilityState !== 'visible' || !running) return;
+  keepAwake();
+  reviveCamera('resumed');
 });
+
+/**
+ * Get pictures flowing again after the app was away, or after the camera stalled mid-set.
+ *
+ * Three things can be broken by the time you come back, and they need fixing in order: the video
+ * element is paused, the camera track is dead, and the frame loop is parked. That last one is the
+ * reason a stall used to be permanent — requestVideoFrameCallback only fires when a frame arrives,
+ * so no pictures means no callback means nothing left running to notice or recover. (Under
+ * requestAnimationFrame the loop kept spinning uselessly, which was at least alive.)
+ */
+async function reviveCamera(reason) {
+  if (reviving || !running) return;
+  reviving = true;
+  try {
+    if (el.cam.paused) await el.cam.play().catch(() => {});
+    if (!cameraAlive(stream)) {
+      el.status.textContent = `Camera ${reason} — restarting`;
+      stopCamera(stream);
+      stream = await startCamera(el.cam, el.facing.dataset.value);
+    }
+    // The frame loop cannot restart itself once parked, and the dedupe below would reject the
+    // first frames of a fresh stream because currentTime starts over.
+    lastVideoTs = -1;
+    lastFrameAt = 0;
+    startLoop();
+  } catch (err) {
+    running = false;
+    big('Camera lost', `${err.name}: ${err.message}. Tap "Change lift" and start again.`);
+  } finally {
+    reviving = false;
+  }
+}
+
+// A stall does not announce itself, so something outside the loop has to watch for one. Cheap,
+// and only while a set is actually on screen.
+const STALL_MS = 2500;
+setInterval(() => {
+  if (!running || document.visibilityState !== 'visible') return;
+  if (lastFrameAt && performance.now() - lastFrameAt > STALL_MS) reviveCamera('stalled');
+}, 1000);
 
 // ── picker ───────────────────────────────────────────────────────────────────────────────
 
@@ -1238,7 +1281,12 @@ async function ensureCamera() {
     landmarker = await createLandmarker(wanted);
     landmarkerModel = wanted;
   }
-  if (!stream) stream = await startCamera(el.cam, el.facing.dataset.value);
+  // Not `if (!stream)`. See cameraAlive() — a backgrounded camera leaves the object intact and
+  // the pictures gone, and reusing it is the frozen-video-on-reopen bug.
+  if (!cameraAlive(stream)) {
+    stopCamera(stream);
+    stream = await startCamera(el.cam, el.facing.dataset.value);
+  }
   el.startErr.textContent = '';
 }
 
