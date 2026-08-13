@@ -54,16 +54,24 @@ shirt, and a false "your back is fine" is dangerous.
 
 ## 3. The exercise catalogue
 
-16 lifts across 6 groups. Each carries its own rules, camera angle, and planning metadata.
+28 lifts across 6 groups. Each carries its own rules, camera angle, and planning metadata.
 
 | Group | Lifts | What gets checked |
 |---|---|---|
-| **Chest** | Bench press, Incline bench, Push-up | Elbow flare, lockout, wrist stacking, left/right evenness, bounce off the chest; push-ups add body-line sag |
-| **Back** | Deadlift, Barbell row, Lat pulldown | Bar drifting off the shins, lockout, hip height at the pull; rows add heaving and elbow path; pulldowns add leaning back |
-| **Shoulders** | Overhead press, Lateral raise | Lower-back arch, lockout, bar path off vertical; raises add going above shoulder height and bending the elbow |
-| **Biceps** | Barbell curl, Hammer curl | Elbows drifting forward, torso swing, full stretch at the bottom, negative speed |
-| **Triceps** | Cable pushdown, Skullcrusher, Dip | Elbows leaving the ribs, torso lean, full extension; skullcrushers add upper-arm drift into a pullover |
+| **Chest** | Bench press, Incline bench, Decline bench, Dumbbell bench, Incline dumbbell, Chest dip, Push-up | Elbow flare, lockout, wrist stacking, left/right evenness, bounce off the chest; push-ups add body-line sag; the chest dip faults on staying UPRIGHT, which is the triceps dip's rule inverted |
+| **Back** | Deadlift, Barbell row, Seated cable row, Straight-arm pulldown, Lat pulldown | Bar drifting off the shins, lockout, hip height at the pull; rows add heaving and elbow path; pulldowns add leaning back; the straight-arm pulldown counts off the shoulder and faults on a bent elbow |
+| **Shoulders** | Overhead press, Lateral raise, Front raise, Rear delt raise, Cable lateral, Cable front raise | Lower-back arch, lockout, bar path off vertical; raises add going above shoulder height and bending the elbow; the rear delt raise faults on standing up out of the hinge instead |
+| **Biceps** | Barbell curl, Hammer curl, Cable curl | Elbows drifting forward, torso swing, full stretch at the bottom, negative speed |
+| **Triceps** | Cable pushdown, Skullcrusher, Overhead cable extension, Dip | Elbows leaving the ribs, torso lean, full extension; the skullcrusher and the overhead extension are the same "upper arms do not move" rule at 92° and 158° |
 | **Legs** | Back squat, Romanian deadlift, Lunge | Depth, torso fold, heels lifting, knee cave-in (front view); RDL adds knee bend and bar drift |
+
+Which delt a raise trains is the *plane* the arm travels through, and that is a camera-angle
+difference rather than a rules difference — so the lateral, front and rear raises come from one
+builder that differs only in `view` and whether the torso rule is "do not lean" or "stay hinged".
+
+Not included, for a reason that will keep recurring: dumbbell flyes, cable crossovers and face
+pulls all move the arms toward the camera. That is world-z, the noisiest channel MediaPipe emits
+and the axis the angle maths deliberately ignores.
 
 Each lift also declares equipment needed, compound vs isolation, which injuries it aggravates, and
 a bodyweight ratio for estimating a sensible starting weight.
@@ -169,6 +177,15 @@ model is worse than a rough one you can see and correct. Instead there is a tabl
 each with macros **per serving** — "1 large egg", "100 g chicken breast", "1 cup dal" — which
 removes all unit arithmetic: a log entry is a food and a quantity. Anything missing you type once
 and it is yours for good, and your own entry overrides a table value you disagree with.
+
+Water is a food, not a subsystem. A glass is an ordinary log entry pointing at a `water` food, so
+the date filtering, the undo button, the backup and the day view all work on it without a line of
+new code — the only additions are an `ml` field on drinks and a target. Fluid is summed from that
+field wherever it appears, so tea and milk count; alcohol deliberately carries no `ml`, because it
+is a diuretic and counting a pint toward hydration would be worse than ignoring it.
+
+The water target has no feedback loop, unlike the calorie one. The honest signal for hydration is
+the colour of your urine, which no phone is going to measure, so it stays a nudge.
 
 Which meal something belongs to is read off the clock rather than asked for. Picking "lunch" from a
 dropdown after you already picked the food is a tap that tells the app what the timestamp said.
@@ -298,7 +315,7 @@ Latest build: https://github.com/GreyL11/GYM-PT-AI/releases/latest (~15 MB)
 
 ## 10. Tests
 
-80 checks across five suites, run in CI before every APK.
+83 checks across five suites, run in CI before every APK.
 
 | Suite | Covers |
 |---|---|
@@ -306,7 +323,7 @@ Latest build: https://github.com/GreyL11/GYM-PT-AI/releases/latest (~15 MB)
 | `test_planner.mjs` (11) | Weekday mapping, equipment and injury filtering, rep schemes, load scaling, no duplicate lifts per session |
 | `test_insights.mjs` (9) | 1RM edges, session grouping, stall detection, deload maths, fingerprint shares, volume windows, fatigue |
 | `test_coach.mjs` (9) | Warm-up ramps, preview-then-commit progression, rep correction, bodyweight rep progression, deload |
-| `test_nutrition.mjs` (21) | Macro arithmetic, food table consistency, the day's log, meal slots, weight trend, target correction and its refusals, backup round-trip |
+| `test_nutrition.mjs` (23) | Macro arithmetic, food table consistency, the day's log, meal slots, water and fluid, weight trend, target correction and its refusals, backup round-trip |
 
 Fed by synthetic landmark frames built to exact joint angles — so the rules are tested against
 geometry, not recordings.

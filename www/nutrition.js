@@ -29,6 +29,17 @@ const GOAL_ADJUST = { strength: 1.05, hypertrophy: 1.10, endurance: 1.0 };
 /** Fat floor in g/kg — below this you are just making your hormones worse to hit a macro. */
 const FAT_PER_KG = 0.8;
 
+/**
+ * Fluid per kg of bodyweight, in ml. ~35 ml/kg is the usual everyday guideline, and training days
+ * get a bump for what you sweat out — roughly half a litre a session, spread over the week.
+ *
+ * Like every other target here it is a starting point, and unlike the calorie one it has no
+ * feedback loop: the honest signal for hydration is the colour of your urine, which no phone is
+ * going to measure. Treat it as a nudge, not a verdict.
+ */
+const WATER_ML_PER_KG = 35;
+const WATER_ML_PER_SESSION = 500;
+
 const round5 = (n) => Math.round(n / 5) * 5;
 
 /** Daily macro targets from the profile you already filled in for training.
@@ -45,6 +56,13 @@ export function targets(profile) {
   // Carbs are whatever calories are left once protein and fat are paid for.
   const carbs = Math.max(0, Math.round((kcal - protein * 4 - fat * 9) / 4));
   return { kcal, protein, carbs, fat };
+}
+
+/** Daily fluid target in ml, rounded to something you can picture in glasses. */
+export function waterTarget(profile) {
+  const perDay = profile.bodyweight * WATER_ML_PER_KG
+    + (WATER_ML_PER_SESSION * (profile.daysPerWeek ?? 3)) / 7;
+  return Math.round(perDay / 100) * 100;
 }
 
 // ── the food table ───────────────────────────────────────────────────────────────────────
@@ -67,7 +85,7 @@ export const FOODS = {
   soyaChunks:    { name: 'Soya chunks, dry', serving: '50 g', cat: 'Protein', kcal: 172, protein: 26, carbs: 16, fat: 0.5 },
   greekYogurt:   { name: 'Greek yogurt', serving: '100 g', cat: 'Protein', kcal: 59, protein: 10, carbs: 3.6, fat: 0.4 },
   curd:          { name: 'Curd / plain yogurt', serving: '100 g', cat: 'Protein', kcal: 61, protein: 3.5, carbs: 4.7, fat: 3.3 },
-  milk:          { name: 'Milk, whole', serving: '250 ml', cat: 'Protein', kcal: 149, protein: 7.7, carbs: 12, fat: 8 },
+  milk:          { name: 'Milk, whole', serving: '250 ml', cat: 'Protein', kcal: 149, protein: 7.7, carbs: 12, fat: 8, ml: 250 },
   cottageCheese: { name: 'Cottage cheese', serving: '100 g', cat: 'Protein', kcal: 98, protein: 11, carbs: 3.4, fat: 4.3 },
   salmon:        { name: 'Salmon', serving: '100 g', cat: 'Protein', kcal: 208, protein: 20, carbs: 0, fat: 13 },
   tuna:          { name: 'Tuna, canned in water', serving: '100 g', cat: 'Protein', kcal: 116, protein: 26, carbs: 0, fat: 1 },
@@ -105,9 +123,17 @@ export const FOODS = {
   salad:         { name: 'Salad, undressed', serving: '1 bowl', cat: 'Veg', kcal: 25, protein: 1.5, carbs: 5, fat: 0.2 },
 
   // Other
-  coffee:        { name: 'Black coffee / tea', serving: '1 cup', cat: 'Other', kcal: 2, protein: 0.3, carbs: 0, fat: 0 },
-  chai:          { name: 'Chai with milk & sugar', serving: '1 cup', cat: 'Other', kcal: 105, protein: 2.5, carbs: 14, fat: 4 },
-  softDrink:     { name: 'Soft drink', serving: '330 ml', cat: 'Other', kcal: 139, protein: 0, carbs: 35, fat: 0 },
+  //
+  // `ml` is fluid that counts toward the day's water. It is on the drinks rather than in a
+  // separate list because a cup of tea hydrates you whether or not you thought of it as water,
+  // and a tracker that only counts what you poured from the tap will always read low.
+  //
+  // Alcohol carries no `ml` on purpose: it is a diuretic, so counting a pint as three quarters of
+  // a litre toward hydration would be actively wrong.
+  water:         { name: 'Water', serving: '250 ml', cat: 'Other', kcal: 0, protein: 0, carbs: 0, fat: 0, ml: 250 },
+  coffee:        { name: 'Black coffee / tea', serving: '1 cup', cat: 'Other', kcal: 2, protein: 0.3, carbs: 0, fat: 0, ml: 200 },
+  chai:          { name: 'Chai with milk & sugar', serving: '1 cup', cat: 'Other', kcal: 105, protein: 2.5, carbs: 14, fat: 4, ml: 200 },
+  softDrink:     { name: 'Soft drink', serving: '330 ml', cat: 'Other', kcal: 139, protein: 0, carbs: 35, fat: 0, ml: 330 },
   // `alcohol` is grams of ethanol, at 7 kcal/g. It is not a macro you track — it is here so the
   // calories add up, because otherwise a beer looks like it contains 50 of them.
   beer:          { name: 'Beer', serving: '330 ml', cat: 'Other', kcal: 143, protein: 1.6, carbs: 11, fat: 0, alcohol: 13 },
@@ -186,6 +212,11 @@ export function totals(entries, foods = allFoods()) {
   }
   for (const k of MACROS) sum[k] = Math.round(sum[k]);
   return sum;
+}
+
+/** Fluid drunk, in ml. Anything with an `ml` counts, so tea and milk are not invisible. */
+export function fluid(entries, foods = allFoods()) {
+  return Math.round(entries.reduce((sum, e) => sum + (foods[e.foodId]?.ml ?? 0) * e.qty, 0));
 }
 
 /** How much of each target is left. Negative means you went over, which matters for calories

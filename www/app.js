@@ -52,6 +52,7 @@ const el = {
   eatList: $('eatlist'), btnEatBack: $('btn-eat-back'), btnEatDone: $('btn-eat-done'),
   fName: $('f-name'), fServing: $('f-serving'), fKcal: $('f-kcal'), fProtein: $('f-protein'),
   fCarbs: $('f-carbs'), fFat: $('f-fat'), foodErr: $('food-err'), btnSaveFood: $('btn-save-food'),
+  waterNow: $('water-now'), waterFill: $('water-fill'), waterAdd: $('water-add'),
   eatCustom: $('eat-custom'), foodClash: $('food-clash'), foodClashText: $('food-clash-text'),
   btnFoodOverwrite: $('btn-food-overwrite'), btnFoodSeparate: $('btn-food-separate'),
   settings: $('sheet-settings'), setEx: $('set-ex'), sliders: $('sliders'), view: $('view'),
@@ -504,6 +505,13 @@ function renderEat() {
   }
   el.eatMacros.append(node('p', 'muted data', nutrition.verdict(profile, entries)));
 
+  // Water. Counted from anything with a volume, so the tea counts without being thought about.
+  const ml = nutrition.fluid(entries);
+  const wantMl = nutrition.waterTarget(profile);
+  el.waterNow.innerHTML = `${(ml / 1000).toFixed(1)}<small> / ${(wantMl / 1000).toFixed(1)} L</small>`;
+  el.waterFill.style.width = `${Math.min(100, (ml / wantMl) * 100)}%`;
+  el.waterFill.style.background = 'var(--eat)';
+
   // What you have already eaten, newest first. Removal is its own button rather than the whole
   // row: a mis-tap on a list you are only reading should not delete your lunch.
   const foods = nutrition.allFoods();
@@ -518,7 +526,12 @@ function renderEat() {
     drop.type = 'button';
     drop.setAttribute('aria-label', `Remove ${f.name}`);
     drop.addEventListener('click', () => { store.removeMeal(e.at); buzz(10); renderEat(); });
-    row.append(text, node('span', 'qty', `${Math.round(f.protein * e.qty)}g P`), drop);
+    // Protein is the number worth showing for food; for a glass of water it is "0g P", which is
+    // just noise. Anything with no protein but a volume reports the volume instead.
+    const figure = f.protein ? `${Math.round(f.protein * e.qty)}g P`
+      : f.ml ? `${Math.round(f.ml * e.qty)} ml`
+      : `${Math.round(f.kcal * e.qty)} kcal`;
+    row.append(text, node('span', 'qty', figure), drop);
     el.eatToday.appendChild(row);
   }
   if (!entries.length) el.eatToday.append(node('p', 'muted', 'Nothing yet today.'));
@@ -570,6 +583,13 @@ function logFood(foodId, qty) {
   buzz(10);
   renderEat();
 }
+
+// A glass is the unit water is stored in, so a bottle is two of them and a litre is four. Keeping
+// one food rather than three means removing a mis-tap works the same as for anything else.
+el.waterAdd.addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (b) logFood('water', Number(b.dataset.ml) / nutrition.FOODS.water.ml);
+});
 
 /** Write the food, log one of it, and put the form back. */
 function commitFood(id, food) {

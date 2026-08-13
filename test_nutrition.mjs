@@ -291,6 +291,37 @@ check('a backup round-trips, and a bad one is refused rather than half-applied',
   assert.equal(store.meals().length, 1, 'still there after every failed restore');
 });
 
+check('water is counted from anything with a volume, but not from alcohol', () => {
+  const day = [
+    { at: 'a', foodId: 'water', qty: 4 },   // a litre
+    { at: 'b', foodId: 'coffee', qty: 2 },  // 400 ml
+    { at: 'c', foodId: 'milk', qty: 1 },    // 250 ml
+    { at: 'd', foodId: 'chickenBreast', qty: 2 }, // no volume at all
+  ];
+  assert.equal(n.fluid(day), 1650);
+
+  // Beer is a diuretic; counting it toward hydration would be worse than not counting it.
+  assert.equal(n.fluid([{ at: 'x', foodId: 'beer', qty: 3 }]), 0);
+  assert.equal(n.fluid([]), 0);
+
+  // Water is fluid and nothing else — it must not move a single macro.
+  const t = n.totals([{ at: 'x', foodId: 'water', qty: 8 }]);
+  assert.deepEqual(t, { kcal: 0, protein: 0, carbs: 0, fat: 0 });
+});
+
+check('the water target scales with bodyweight and how often you train', () => {
+  const light = n.waterTarget(P({ bodyweight: 60, daysPerWeek: 3 }));
+  const heavy = n.waterTarget(P({ bodyweight: 100, daysPerWeek: 3 }));
+  assert.ok(heavy > light, 'a bigger lifter needs more');
+  assert.ok(n.waterTarget(P({ bodyweight: 80, daysPerWeek: 6 })) > n.waterTarget(P({ bodyweight: 80, daysPerWeek: 2 })),
+    'and so does training more often');
+
+  // Sane magnitudes: an 80 kg lifter lands somewhere around three litres, not thirty or three hundred.
+  const t = n.waterTarget(P({ bodyweight: 80, daysPerWeek: 4 }));
+  assert.ok(t >= 2500 && t <= 3600, `expected roughly 3 L, got ${t}`);
+  assert.equal(t % 100, 0, 'rounded to something you can picture in glasses');
+});
+
 check('every food in the table is complete and lands in a real category', () => {
   for (const [id, f] of Object.entries(n.FOODS)) {
     assert.ok(f.name && f.serving, `${id} is missing its name or serving`);

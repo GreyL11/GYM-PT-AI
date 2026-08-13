@@ -45,6 +45,11 @@ per week. Tap **Eat**, tap what you ate. Half and double servings are one tap; a
 table you type once and it is yours for good. Your most-eaten foods collect under **Usual**, which
 is what makes it two taps a meal by the second week.
 
+**Water** has its own buttons at the top of the screen — glass, bottle, litre — because logging a
+drink through the food picker is four taps for something you do ten times a day. Anything with a
+volume counts toward it, so your tea and your milk are not invisible. Beer is not: it is a diuretic,
+and counting a pint toward hydration would be worse than not counting it.
+
 There is no food API, no downloaded database and no language model. The app has no network and no
 account, and a nutrition API would need a key baked into the APK that stops working on gym wifi.
 The table covers the staples; you cover the rest, once.
