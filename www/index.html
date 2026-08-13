@@ -412,6 +412,96 @@
   .slot.on { color: var(--eat); }
   .slot.on i { background: var(--eat); border-color: var(--eat); }
 
+  /* ── today, set as a page ────────────────────────────────────────────────────────────────
+     Cards were doing separation that space and a hairline do better, and a grid of tiles is what
+     every other training app looks like. This is a masthead, a running order and a spec row. */
+  #sheet-today .body { gap: 0; padding-top: 20px; }
+
+  .masthead { padding-bottom: 22px; }
+  .daymark {
+    display: flex; align-items: baseline; gap: 10px;
+    font: 700 11px/16px var(--mono); letter-spacing: .18em; text-transform: uppercase;
+  }
+  .daymark span:first-child { color: var(--train); }
+  .daymark span:last-child { color: var(--on-surface-variant); }
+  .session {
+    margin: 10px 0 0; font: 900 clamp(38px, 13vw, 60px)/0.94 var(--sans);
+    letter-spacing: -.045em; text-transform: uppercase;
+  }
+  .sessionmeta {
+    margin-top: 10px; color: var(--on-surface-variant);
+    font: 700 12px/18px var(--mono); letter-spacing: .12em; text-transform: uppercase;
+  }
+  button.wide { width: 100%; margin-top: 20px; }
+
+  /* The running order. Numbered because the order is the plan, and ruled because a stack of tiles
+     is six more boxes than this needs. */
+  .lifts { display: flex; flex-direction: column; border-top: 1px solid var(--outline-variant); }
+  .lifts button {
+    display: flex; align-items: baseline; gap: 14px; width: 100%; padding: 16px 2px;
+    background: none; border: none; border-bottom: 1px solid var(--outline-variant);
+    border-radius: 0; text-align: left; min-height: 0;
+  }
+  .lifts .no {
+    flex: 0 0 auto; width: 22px; color: var(--on-surface-variant);
+    font: 700 12px/20px var(--mono); font-variant-numeric: tabular-nums;
+  }
+  .lifts .nm {
+    flex: 1; min-width: 0; font: 600 17px/22px var(--sans); text-transform: none; letter-spacing: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .lifts .meta {
+    flex: 0 0 auto; color: var(--on-surface-variant);
+    font: 700 12px/20px var(--mono); font-variant-numeric: tabular-nums;
+  }
+  .lifts button.done .nm { color: var(--on-surface-variant); text-decoration: line-through; }
+  .lifts button.done .no { color: var(--eat); }
+  .lifts button.done .meta { color: var(--eat); }
+
+  /* A spec row: figures under a rule, no boxes. */
+  .readout {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px;
+    margin-top: 26px; border-top: 1px solid var(--outline-variant); padding-top: 16px;
+  }
+  .readout > button {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+    min-width: 0; min-height: 0; padding: 0 10px 0 0; text-align: left;
+    background: none; border: none; border-radius: 0;
+  }
+  .readout .k { font: 700 10px/14px var(--mono); letter-spacing: .12em; text-transform: uppercase;
+                color: var(--on-surface-variant); }
+  .readout .v { font: 800 22px/26px var(--sans); letter-spacing: -.02em; color: var(--on-surface);
+                text-transform: none; }
+  .readout .v small { display: block; font: 700 10px/14px var(--mono); color: var(--on-surface-variant); }
+  .readout .sub { font: 700 10px/14px var(--mono); color: var(--on-surface-variant);
+                  text-transform: uppercase; letter-spacing: .06em; }
+  .readout .bar { width: 100%; }
+  .readout .bar .track { display: block; width: 100%; height: 3px; }
+  .readout .spark { height: 18px; }
+
+  #sheet-today #coach-card { margin-top: 26px; }
+  #sheet-today #today-note { margin-top: 16px; }
+
+  /* Three glanceable numbers on one row. Cards imply "this is a subject"; these are readouts. */
+  .strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .strip > button {
+    display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start;
+    gap: 3px; min-width: 0; min-height: 76px; padding: 10px 12px; text-align: left;
+    background: var(--sc); border: 1px solid var(--outline-variant); border-radius: 14px;
+  }
+  .strip .k { font: 700 10px/14px var(--mono); letter-spacing: .12em; text-transform: uppercase;
+              color: var(--on-surface-variant); }
+  .strip .v { font: 800 20px/24px var(--sans); letter-spacing: -.02em; color: var(--on-surface);
+              text-transform: none; white-space: nowrap; }
+  /* The qualifier goes on its own line. A third of a phone is not wide enough for "78.9 kg · +0.9"
+     beside the number, and clipping it to "+0.9" with the sign cut off is worse than stacking. */
+  .strip .v small { display: block; font: 700 11px/14px var(--mono); color: var(--on-surface-variant); }
+  .strip .sub { font: 700 10px/14px var(--mono); color: var(--on-surface-variant);
+                text-transform: uppercase; letter-spacing: .06em; }
+  .strip .bar { width: 100%; }
+  .strip .bar .track { display: block; width: 100%; height: 4px; }
+  .strip .spark { height: 20px; }
+
   .spark { width: 100%; height: 36px; display: block; }
   .spark .empty { stroke: var(--sc-highest); stroke-width: 3; stroke-dasharray: 10 8; }
 
@@ -534,59 +624,41 @@
   <section class="sheet" id="sheet-today" hidden>
     <header><div class="brand">Trainer</div></header>
     <div class="body">
-      <div>
-        <div id="today-day" class="data" style="color:var(--train)">—</div>
-        <h1 id="today-greet" class="hero" style="margin:6px 0 0">—</h1>
+      <!-- A page, not a dashboard. Every fitness app is two tiles over a stat strip; this one is
+           set like print — a masthead, a running order, a rule, a footnote. Hairlines and space do
+           the separating that boxes were doing. -->
+      <div class="masthead">
+        <div class="daymark"><span id="today-day">—</span><span id="today-greet"></span></div>
+        <h1 id="today-name" class="session">—</h1>
+        <div id="train-stats" class="sessionmeta"></div>
+        <button id="btn-start-today" class="train wide">Start</button>
       </div>
 
-      <div class="grid2">
-        <div class="card train">
-          <div class="cardlabel">Train</div>
-          <div id="today-name" class="headline">—</div>
-          <div id="train-stats" class="muted data"></div>
-          <div class="grow"></div>
-          <button id="btn-start-today" class="train">Start</button>
-        </div>
-
-        <div class="card eat">
-          <div class="cardlabel">Eat</div>
-          <div id="eat-kcal" class="big"></div>
-          <div id="meal-slots" class="slots"></div>
-          <div class="grow"></div>
-          <button id="btn-eat" class="eat">+ Log meal</button>
-        </div>
-      </div>
-
-      <div class="grid2">
-        <div class="card">
-          <div class="line">
-            <span class="cardlabel" style="color:var(--eat)">Weight</span>
-            <button id="btn-log-weight" style="min-height:28px;padding:0 10px;font-size:12px">+ Log</button>
-          </div>
-          <div id="weight-now" class="big"></div>
-          <div id="weight-spark"></div>
-        </div>
-
-        <div class="card">
-          <div class="cardlabel">Protein</div>
-          <div id="protein-now" class="big"></div>
-          <div class="bar"><div class="track"><div id="protein-fill" class="fill"></div></div></div>
-        </div>
-      </div>
-
-      <div id="todaylist" class="exlist"></div>
+      <div id="todaylist" class="lifts"></div>
       <p id="today-note" class="muted data"></p>
 
+      <!-- Readouts, not cards: a row of figures under a rule, the way a spec sheet lists them. -->
+      <div class="readout">
+        <button id="btn-strip-protein" type="button">
+          <span class="k">Protein</span><span class="v" id="protein-now"></span>
+          <span class="bar"><span class="track"><span id="protein-fill" class="fill"></span></span></span>
+        </button>
+        <button id="btn-log-weight" type="button">
+          <span class="k">Weight</span><span class="v" id="weight-now"></span>
+          <span id="weight-spark"></span>
+        </button>
+        <button id="btn-strip-week" type="button">
+          <span class="k">Sets · 7d</span><span class="v" id="week-sets"></span>
+          <span class="sub" id="week-sub"></span>
+        </button>
+      </div>
+
+      <!-- One sentence. The 28-day chart it used to carry lives on Stats now: it is something you
+           read once a week sitting down, not between sets. -->
       <div class="card" id="coach-card">
         <div class="line">
           <span class="cardlabel" style="color:var(--train)">Coach</span>
           <span class="cardlabel" id="coach-drift"></span>
-        </div>
-        <div class="cardlabel" style="color:var(--on-surface-variant)">Bodyweight · Calories · 28d</div>
-        <svg id="coach-chart" viewBox="0 0 320 150" preserveAspectRatio="none"></svg>
-        <div class="legend">
-          <span><i style="background:var(--train)"></i>Bodyweight</span>
-          <span><i style="background:var(--eat)"></i>Calories</span>
         </div>
         <p id="coach-line" class="coachline"></p>
         <div id="coach-suggest" class="suggest" hidden>
@@ -687,7 +759,20 @@
       <div class="brand" style="flex:1;text-align:center;font-size:24px">Progress</div>
       <div style="width:44px"></div>
     </header>
-    <div class="body" id="progress-body"></div>
+    <div class="body" id="progress-body">
+      <div class="card" id="trend-card">
+        <div class="line">
+          <span class="cardlabel" style="color:var(--train)">Bodyweight · Calories</span>
+          <span class="cardlabel" id="trend-drift"></span>
+        </div>
+        <svg id="coach-chart" viewBox="0 0 320 150" preserveAspectRatio="none"></svg>
+        <div class="legend">
+          <span><i style="background:var(--train)"></i>Bodyweight</span>
+          <span><i style="background:var(--eat)"></i>Calories</span>
+        </div>
+      </div>
+      <div id="progress-dyn" style="display:flex;flex-direction:column;gap:var(--stack)"></div>
+    </div>
     <div class="foot"><button id="btn-progress-done" class="primary">Done</button></div>
   </section>
 
