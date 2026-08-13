@@ -56,7 +56,12 @@ function body({
   return lm;
 }
 
-/** Feed frames through step(), collecting every fault id emitted along the way. */
+/** Feed frames through step(), collecting every fault id emitted along the way.
+ *
+ *  Frames are spaced 100ms apart, not one 30fps frame apart. These sequences are a dozen or two
+ *  poses describing a whole rep, so at 33ms each a squat took 0.6s — faster than anyone has ever
+ *  squatted, and below the floor step() now uses to tell a rep from someone shifting a plate.
+ *  The spacing describes the tempo being modelled, not the camera's frame rate. */
 function run(exId, frames, opts = {}) {
   const st = createState();
   const T = { ...defaultThresholds(exId), ...(opts.thresholds ?? {}) };
@@ -64,7 +69,7 @@ function run(exId, frames, opts = {}) {
   let last;
   frames.forEach((lm, i) => {
     // Same array for lm and w: the synthetic frame is already metric-ish and undistorted.
-    last = step(exId, { lm, w: lm, tMs: i * 33, view: opts.view }, st, T);
+    last = step(exId, { lm, w: lm, tMs: i * 100, view: opts.view }, st, T);
     for (const f of last.faults) seen.push(f.id);
   });
   return { st, faults: seen, last };
@@ -110,6 +115,32 @@ check('pushdown counts reps on the inverted arc (flexed → locked → flexed)',
     ...hold(6, () => body({ elbowAngle: 70 })),
   ];
   assert.equal(run('pushdown', frames).st.reps, 1);
+});
+
+check('kit being moved around is not a set of reps', () => {
+  // Reported from a real gym: setting the seat and loading plates for an overhead press counted
+  // four reps before the first one. An OHP starts at a bent elbow and finishes at a straight one,
+  // which is also what putting a plate on the sleeve looks like — the difference is that nobody
+  // does it slowly.
+  // Same pose sequence as the overhead-press rep-counting test; only the clock differs. Fewer
+  // frames than this and the smoothing never reaches the end position, so nothing completes.
+  const poses = [
+    ...hold(3, () => body({ elbowAngle: 78 })),
+    ...hold(6, () => body({ elbowAngle: 176 })),
+    ...hold(6, () => body({ elbowAngle: 78 })),
+  ];
+  const swing = (ms) => poses.map((lm, i) => ({ lm, tMs: (i * ms) / poses.length }));
+
+  const runTimed = (frames) => {
+    const st = createState();
+    const T = defaultThresholds('ohp');
+    for (const f of frames) step('ohp', { lm: f.lm, w: f.lm, tMs: f.tMs, view: 'side' }, st, T);
+    return st;
+  };
+
+  assert.equal(runTimed(swing(300)).reps, 0, 'a third of a second is someone moving a weight');
+  assert.equal(runTimed(swing(300)).rejected, 1, 'and it is counted as rejected, not lost');
+  assert.equal(runTimed(swing(2000)).reps, 1, 'two seconds is a rep');
 });
 
 check('jitter around one endpoint does not double-count', () => {

@@ -21,7 +21,7 @@ const el = {
   today: $('sheet-today'), todayDay: $('today-day'), todayName: $('today-name'),
   todayList: $('todaylist'), todayNote: $('today-note'),
   btnBrowse: $('btn-browse'), btnProfile: $('btn-profile'), btnProgress: $('btn-progress'),
-  progress: $('sheet-progress'), progressBody: $('progress-body'),
+  progress: $('sheet-progress'), progressBody: $('progress-body'), progressDyn: $('progress-dyn'),
   btnProgressBack: $('btn-progress-back'), btnProgressDone: $('btn-progress-done'),
   profile: $('sheet-profile'), inBw: $('in-bw'), inDays: $('in-days'),
   pExperience: $('p-experience'), pGoal: $('p-goal'), pEquipment: $('p-equipment'),
@@ -39,10 +39,13 @@ const el = {
   rest: $('sheet-rest'), restTime: $('resttime'), restFill: $('restfill'),
   restSummary: $('rest-summary'), btnNext: $('btn-next'),
   todayGreet: $('today-greet'), trainStats: $('train-stats'), btnStartToday: $('btn-start-today'),
-  eatKcal: $('eat-kcal'), mealSlots: $('meal-slots'), btnEat: $('btn-eat'), btnEatTab: $('btn-eat-tab'),
+  btnEatTab: $('btn-eat-tab'),
   weightNow: $('weight-now'), weightSpark: $('weight-spark'), btnLogWeight: $('btn-log-weight'),
   proteinNow: $('protein-now'), proteinFill: $('protein-fill'), inName: $('in-name'),
   coachChart: $('coach-chart'), coachDrift: $('coach-drift'), coachLine: $('coach-line'),
+  trendCard: $('trend-card'), trendDrift: $('trend-drift'),
+  weekSets: $('week-sets'), weekSub: $('week-sub'), btnStripProtein: $('btn-strip-protein'),
+  btnStripWeek: $('btn-strip-week'),
   coachSuggest: $('coach-suggest'), suggestText: $('suggest-text'),
   btnAcceptTarget: $('btn-accept-target'), btnResetTarget: $('btn-reset-target'),
   eat: $('sheet-eat'), eatMacros: $('eat-macros'), eatToday: $('eat-today'), eatCats: $('eat-cats'),
@@ -108,9 +111,22 @@ let scratch = createState();  // throwaway state so framing/calibration never ba
 let calSamples = [];
 let calUntil = 0;
 let framedFrames = 0;
+let framedLo = Infinity;   // angle band seen during the framing hold — drift means still setting up
+let framedHi = -Infinity;
+let loopGen = 0;           // bumped on every start, so an old frame loop cannot outlive its set
 
 const CAL_SECONDS = 15;
-const FRAMED_FRAMES_NEEDED = 15;  // ~half a second held in the start position
+
+// Auto-start used to need half a second in the start position, which is not a test of anything:
+// setting a seat, threading a pin and sliding plates on all park you at a bent elbow, and an
+// overhead press *starts* at a bent elbow. It armed while the lifter was still setting up and then
+// counted the loading as reps.
+//
+// Stillness is what actually separates "ready" from "busy". Setting up is constant movement; the
+// moment before a set is the one moment you are deliberately motionless. So: hold the start
+// position, and hold it STILL, for a decent beat.
+const FRAMED_FRAMES_NEEDED = 45;  // ~1.5s at 30fps
+const FRAMED_STILL_DEG = 8;       // total drift allowed across that hold
 
 const buzz = (pattern) => navigator.vibrate?.(pattern);
 
@@ -185,15 +201,16 @@ function showToday() {
   const session = planner.today(now);
   const profile = planner.getProfile();
   el.todayDay.textContent = WEEKDAYS[now.getDay()];
-  el.todayGreet.textContent = profile.name ? `Hi ${profile.name}` : 'Today';
+  el.todayGreet.textContent = profile.name ?? '';
   el.todayList.innerHTML = '';
   renderEatCards(profile);
 
   if (!session) {
     const next = planner.nextTrainingDay(now);
     el.todayName.textContent = 'Rest';
-    el.trainStats.textContent = next ? `Next: ${next.day}` : '';
-    el.btnStartToday.textContent = 'All lifts';
+    el.trainStats.textContent = next ? `Next · ${next.session.name} · ${next.day}` : '';
+    el.btnStartToday.textContent = 'Train anyway';
+    el.btnStartToday.disabled = false;
     el.todayNote.textContent = next
       ? `Next up: ${next.session.name} on ${next.day}. Tap "All lifts" if you want to train anyway.`
       : 'No training days set. Check your profile.';
@@ -201,23 +218,28 @@ function showToday() {
   }
 
   el.todayName.textContent = session.name;
-  el.btnStartToday.textContent = 'Start';
-  el.trainStats.textContent = `${session.exercises.length} ex · ${session.exercises.reduce((a, e) => a + e.sets, 0)} sets`;
+  el.trainStats.textContent = `${session.exercises.length} lifts · ${session.exercises.reduce((a, e) => a + e.sets, 0)} sets`;
   const done = planner.doneToday(session, now);
-  for (const item of session.exercises) {
+  const left = session.exercises.filter((e) => !done.has(e.exId));
+  el.btnStartToday.textContent = left.length ? `Start · ${left[0].name}` : 'Session complete';
+  el.btnStartToday.disabled = !left.length;
+
+  session.exercises.forEach((item, i) => {
     const b = document.createElement('button');
-    b.innerHTML = '<span class="nm"></span><span class="meta"></span>';
+    b.innerHTML = '<span class="no"></span><span class="nm"></span><span class="meta"></span>';
+    // Numbered, because the order is the plan — and a ticked number reads as progress down a list
+    // in a way that six identical tiles never did.
+    b.querySelector('.no').textContent = done.has(item.exId) ? '✓' : String(i + 1).padStart(2, '0');
     b.querySelector('.nm').textContent = item.name;
     b.querySelector('.meta').textContent = done.has(item.exId)
       ? 'Done'
-      : `${item.sets}×${item.reps} · ${item.load ? `${item.load} kg` : 'bodyweight'}`;
+      : `${item.sets}×${item.reps} · ${item.load ? `${item.load} kg` : 'BW'}`;
     if (done.has(item.exId)) b.classList.add('done');
     b.addEventListener('click', () => showSetup(item.exId, item));
     el.todayList.appendChild(b);
-  }
+  });
   const notes = [];
-  const left = session.exercises.length - done.size;
-  notes.push(left ? `${left} of ${session.exercises.length} to go.` : 'Session complete. Good work.');
+  notes.push(left.length ? `${left.length} of ${session.exercises.length} to go.` : 'Session complete. Good work.');
 
   // Anything today that you hammered less than 48h ago.
   for (const w of insights.recoveryWarnings(session, now)) {
@@ -247,39 +269,27 @@ function renderEatCards(profile = planner.getProfile()) {
   const t = nutrition.targets(profile);
   const have = nutrition.totals(entries);
 
-  el.eatKcal.innerHTML = '';
-  el.eatKcal.append(
-    node('span', null, have.kcal ? String(have.kcal) : '—'),
-    node('span', 'of', ` / ${t.kcal.toLocaleString()} kcal`),
-  );
-
-  const eaten = nutrition.mealsEaten(entries);
-  el.mealSlots.innerHTML = '';
-  for (const m of nutrition.MEALS) {
-    const row = node('div', `slot${eaten.has(m) ? ' on' : ''}`);
-    row.append(node('i'), node('span', null, m));
-    el.mealSlots.appendChild(row);
-  }
-
   // No 'under' class: being short of protein at 2pm is the normal state of a day, and a greyed
   // bar reads as failed. The width already says how far along you are.
   const pct = Math.round((have.protein / t.protein) * 100);
-  el.proteinNow.innerHTML = '';
-  el.proteinNow.append(node('span', null, String(have.protein)), node('span', 'of', ` / ${t.protein}g`));
+  el.proteinNow.innerHTML = `${have.protein}<small> / ${t.protein}g</small>`;
   el.proteinFill.style.width = `${Math.min(100, pct)}%`;
   el.proteinFill.style.background = 'var(--eat)';
 
   // Bodyweight: the number is the profile's, the history is what makes it mean anything.
   const trend = nutrition.weightTrend();
-  el.weightNow.innerHTML = '';
-  el.weightNow.append(
-    node('span', null, `${trend.now ?? profile.bodyweight}`),
-    node('span', 'of', ` kg${trend.change === null ? '' : ` · ${trend.change > 0 ? '+' : ''}${trend.change}`}`),
-  );
+  const kg = trend.now ?? profile.bodyweight;
+  el.weightNow.innerHTML = `${kg}<small> kg${trend.change === null ? '' : ` · ${trend.change > 0 ? '+' : ''}${trend.change}`}</small>`;
   el.weightSpark.innerHTML = '';
   el.weightSpark.appendChild(sparkline(trend.points.map((p) => p.kg)));
 
-  renderCoach(profile);
+  // Sets this week, against the range that actually grows anything.
+  const volume = insights.summary().volume;
+  const vol = Object.values(volume).reduce((a, b) => a + b, 0);
+  el.weekSets.textContent = String(vol);
+  el.weekSub.textContent = vol ? `${Object.keys(volume).length} groups` : 'nothing yet';
+
+  renderCoachLine(profile);
 }
 
 const SVG = 'http://www.w3.org/2000/svg';
@@ -296,9 +306,35 @@ const svgEl = (tag, attrs) => {
  * box — this chart is for reading DIRECTION, not values. Gaps stay gaps: a day you logged nothing
  * breaks the line rather than dropping it to zero.
  */
+/** The home screen's one sentence, plus the target suggestion if the scale has earned one. */
+function renderCoachLine(profile) {
+  const series = nutrition.dailySeries(28);
+  const trend = nutrition.weightTrend(28);
+  el.coachDrift.textContent = trend.change === null ? ''
+    : `${trend.change > 0 ? '↗' : trend.change < 0 ? '↘' : '→'} ${trend.change > 0 ? '+' : ''}${trend.change} kg`;
+  el.coachDrift.style.color = trend.change === null ? 'var(--on-surface-variant)' : 'var(--eat)';
+  el.coachLine.textContent = nutrition.coachLine(profile, series);
+
+  const s = nutrition.suggestion(profile, series);
+  el.coachSuggest.hidden = !s && !profile.kcalTarget;
+  el.btnAcceptTarget.hidden = !s;
+  el.btnResetTarget.hidden = !profile.kcalTarget;
+  if (s) {
+    // Phrased against what is being EATEN. "Down 485" next to "eat more" is how you get someone
+    // to distrust the whole screen.
+    const move = s.eatingDelta > 0 ? `${s.eatingDelta} more` : `${Math.abs(s.eatingDelta)} less`;
+    el.suggestText.textContent = `You are ${s.reason}. You have averaged ${s.eating} kcal a day — ${move} would do it.`;
+    el.btnAcceptTarget.textContent = `Use ${s.to} kcal`;
+  } else if (profile.kcalTarget) {
+    el.suggestText.textContent = `Target set from your own numbers: ${profile.kcalTarget} kcal a day.`;
+  }
+}
+
+/** Bodyweight against calories. Lives on Stats: it is a sit-down read, not a between-sets one. */
 function renderCoach(profile) {
   const series = nutrition.dailySeries(28);
   const chart = el.coachChart;
+  if (!chart) return;
   chart.innerHTML = '';
 
   const W = 320, H = 150, PAD = 8;
@@ -372,24 +408,9 @@ function renderCoach(profile) {
   }
 
   const trend = nutrition.weightTrend(28);
-  el.coachDrift.textContent = trend.change === null ? '' : `${trend.change > 0 ? '↗' : trend.change < 0 ? '↘' : '→'} ${trend.change > 0 ? '+' : ''}${trend.change} kg`;
-  el.coachDrift.style.color = trend.change === null ? 'var(--on-surface-variant)' : 'var(--eat)';
-  el.coachLine.textContent = nutrition.coachLine(profile, series);
-
-  // The scale's correction to the calorie target, offered rather than applied.
-  const s = nutrition.suggestion(profile, series);
-  el.coachSuggest.hidden = !s && !profile.kcalTarget;
-  el.btnAcceptTarget.hidden = !s;
-  el.btnResetTarget.hidden = !profile.kcalTarget;
-  if (s) {
-    // Phrased against what is being EATEN. "Down 485" next to "eat more" is how you get someone
-    // to distrust the whole screen.
-    const move = s.eatingDelta > 0 ? `${s.eatingDelta} more` : `${Math.abs(s.eatingDelta)} less`;
-    el.suggestText.textContent = `You are ${s.reason}. You have averaged ${s.eating} kcal a day — ${move} would do it.`;
-    el.btnAcceptTarget.textContent = `Use ${s.to} kcal`;
-  } else if (profile.kcalTarget) {
-    el.suggestText.textContent = `Target set from your own numbers: ${profile.kcalTarget} kcal a day.`;
-  }
+  el.trendDrift.textContent = trend.change === null ? ''
+    : `${trend.change > 0 ? '↗' : trend.change < 0 ? '↘' : '→'} ${trend.change > 0 ? '+' : ''}${trend.change} kg`;
+  el.trendDrift.style.color = trend.change === null ? 'var(--on-surface-variant)' : 'var(--eat)';
 }
 
 el.btnAcceptTarget.addEventListener('click', () => {
@@ -607,7 +628,6 @@ el.btnFoodSeparate.addEventListener('click', () => {
   pendingFood = null;
 });
 
-el.btnEat.addEventListener('click', showEat);
 el.btnEatTab.addEventListener('click', showEat);
 el.btnEatBack.addEventListener('click', showToday);
 el.btnEatDone.addEventListener('click', showToday);
@@ -618,6 +638,10 @@ el.btnLogWeight.addEventListener('click', () => {
   el.inBw.focus();
   el.inBw.select();
 });
+
+// The strip is three readouts, and each one is a door to the screen it came from.
+el.btnStripProtein.addEventListener('click', showEat);
+el.btnStripWeek.addEventListener('click', showProgress);
 
 // ── progress ─────────────────────────────────────────────────────────────────────────────
 
@@ -631,8 +655,10 @@ function line(k, v, cls) {
 function showProgress() {
   show(el.progress);
   const s = insights.summary();
-  const body = el.progressBody;
+  // Only the generated part is rebuilt; the trend chart above it is markup, not output.
+  const body = el.progressDyn;
   body.innerHTML = '';
+  renderCoach(planner.getProfile());
 
   renderEatStats(body);
 
@@ -849,13 +875,50 @@ function showCue(text) {
   el.cue.textContent = text;
   el.cue.classList.add('show');
   clearTimeout(cueTimer);
-  cueTimer = setTimeout(() => el.cue.classList.remove('show'), 3500);
+  cueTimer = setTimeout(() => el.cue.classList.remove('show'), 4500);
+}
+
+/**
+ * Say so, once, if the phone turns out to have no working text-to-speech.
+ *
+ * A device can accept speak() and make no sound for the entire session — which reads as "the app
+ * is not coaching me" rather than "this phone has no voice installed". The cues are all on screen
+ * regardless, so the set is still coached; the lifter just needs to know where to look.
+ */
+let voiceWarned = false;
+function checkVoice() {
+  if (voiceWarned || !el.voice.checked) return;
+  if (voice.working !== false) return;
+  voiceWarned = true;
+  showCue('No voice on this phone — watch this bar for corrections.');
+  buzz([70, 60, 70]);
 }
 
 // ── the frame loop ───────────────────────────────────────────────────────────────────────
 
-function loop() {
-  if (!running) return;
+/**
+ * @param {number} gen  the generation this loop belongs to. `running` alone was not enough: it is
+ *   only observed on the NEXT animation frame, so leaving the camera and starting another lift
+ *   quickly left the old loop's pending callback alive to see `running === true` again and keep
+ *   going. Two loops then called detectForVideo() on one landmarker, which is not reentrant and
+ *   wants monotonic timestamps — that is the freeze.
+ */
+function loop(gen) {
+  if (!running || gen !== loopGen) return;
+  try {
+    frame();
+  } catch (err) {
+    // An exception used to escape the callback, so nothing rescheduled the loop and the screen
+    // simply stopped — no message, no way back except force-quitting. A dead loop must say so.
+    running = false;
+    big('Camera stopped', `${err.name}: ${err.message}. Tap "Change lift" and start again.`);
+    el.status.textContent = 'Stopped';
+    return;
+  }
+  requestAnimationFrame(() => loop(gen));
+}
+
+function frame() {
   const v = el.cam;
   if (v.readyState >= 2 && v.currentTime !== lastVideoTs) {
     lastVideoTs = v.currentTime;
@@ -880,6 +943,7 @@ function loop() {
         const cue = coach.onFrame(out);
         if (cue) { showCue(cue); buzz([70, 60, 70]); }
         el.repnum.textContent = String(out.reps);
+        checkVoice();
       }
 
       el.status.textContent = out.visible ? `${Math.round(out.angle)}° · ${out.phase}` : 'Step back into frame';
@@ -892,28 +956,46 @@ function loop() {
       drawSkeleton(el.overlay.getContext('2d'), null, { width: el.overlay.width, height: el.overlay.height });
     }
   }
-  requestAnimationFrame(loop);
 }
 
 // ── framing: do not start counting while the lifter walks to the bar ─────────────────────
 
 function onFramingFrame(out) {
   if (!out.visible) {
-    framedFrames = 0;
+    resetFraming();
     big('Step back', 'I need to see all of you in frame');
     return;
   }
   if (out.phase !== 'start') {
-    framedFrames = 0;
+    resetFraming();
     big('Get set', 'Stand in the starting position');
     return;
   }
+
+  // Still, not merely present. Any drift beyond the band restarts the hold, so moving kit around
+  // in the start position never arms the set.
+  framedLo = Math.min(framedLo, out.angle);
+  framedHi = Math.max(framedHi, out.angle);
+  if (framedHi - framedLo > FRAMED_STILL_DEG) {
+    resetFraming();
+    big('Hold still', 'Set up first, then hold the start position');
+    return;
+  }
+
   framedFrames += 1;
   if (framedFrames < FRAMED_FRAMES_NEEDED) {
-    big('Hold it', 'Got you');
+    // A countdown you can watch is a countdown you can beat — otherwise "Hold it" for a second and
+    // a half feels like the app has hung.
+    big('Hold it', `${Math.ceil((FRAMED_FRAMES_NEEDED - framedFrames) / 30 * 10) / 10}s`);
     return;
   }
   countIn();
+}
+
+function resetFraming() {
+  framedFrames = 0;
+  framedLo = Infinity;
+  framedHi = -Infinity;
 }
 
 function countIn() {
@@ -972,14 +1054,21 @@ function beginSet() {
   for (const s of SHEETS()) s.hidden = true;
   setState = createState();
   scratch = createState();
-  framedFrames = 0;
+  resetFraming();
   refreshHud();
   running = true;
   keepAwake();
   // Auto-start rather than counting reps while you are still walking to the bar.
   mode = 'framing';
   big('Get set', coach.state.hint);
-  requestAnimationFrame(loop);
+  startLoop();
+}
+
+/** Claim the loop. Any loop from a previous set sees a stale generation and retires itself. */
+function startLoop() {
+  loopGen += 1;
+  const gen = loopGen;
+  requestAnimationFrame(() => loop(gen));
 }
 
 // ── buttons ──────────────────────────────────────────────────────────────────────────────
@@ -1031,7 +1120,7 @@ el.btnCalibrate.addEventListener('click', async () => {
     keepAwake();
     voice.speak(`Do ${CAL_SECONDS} seconds of slow reps with your best form.`);
     big(String(CAL_SECONDS), 'Slow reps, best form');
-    requestAnimationFrame(loop);
+    startLoop();
   } catch (err) {
     el.startErr.textContent = `${err.name}: ${err.message}`;
   } finally {

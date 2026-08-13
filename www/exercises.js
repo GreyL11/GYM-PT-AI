@@ -770,12 +770,23 @@ export function createState() {
     faultFrames: {},  // consecutive frames each fault has held
     faultCounts: {},  // total times each fault fired this set — feeds progression
     repMs: [],        // duration of each completed rep; late reps slowing down is fatigue
+    rejected: 0,      // movements too fast to be reps — kit being moved around, not lifting
   };
 }
 
 const EMA_ALPHA = 0.4;   // heavier = twitchier. 0.4 kills MediaPipe jitter without lagging a fast rep.
 const HYSTERESIS = 12;   // deg of slop around each rep endpoint, so noise cannot double-count
 const HOLD_FRAMES = 3;   // a fault must survive this many frames before it is spoken
+
+/**
+ * Below this, a completed "rep" was not a rep.
+ *
+ * Racking a pin, loading a plate or waving at someone sweeps the same arc a lift does — an
+ * overhead press starts at a bent elbow and finishes at a straight one, which is also what putting
+ * a 20 tin on the sleeve looks like. Nobody moves a loaded bar through full range and back in half
+ * a second, so anything faster is the gym happening around the camera, not a rep.
+ */
+export const MIN_REP_MS = 500;
 
 /**
  * Advance one frame.
@@ -830,12 +841,19 @@ export function step(exId, frame, st, T) {
     if (!atStart && st.tLeftStart === 0) st.tLeftStart = tMs;
     if (atEnd) { st.phase = 'end'; st.tEnd = tMs; }
   } else if (atStart) {
+    // A rep that took no time did not happen — see MIN_REP_MS. The phase still resets, so the
+    // next genuine rep counts normally.
+    const took = st.tLeftStart ? tMs - st.tLeftStart : Infinity;
     st.phase = 'start';
-    st.reps += 1;
-    if (st.tLeftStart) st.repMs.push(tMs - st.tLeftStart);
+    if (took >= MIN_REP_MS) {
+      st.reps += 1;
+      if (st.tLeftStart) st.repMs.push(took);
+      repCompleted = true;
+    } else {
+      st.rejected = (st.rejected ?? 0) + 1;
+    }
     st.tLeftStart = 0;
     st.tEnd = 0;
-    repCompleted = true;
   }
 
   // ── fault evaluation ───────────────────────────────────────────────────────────────────

@@ -106,7 +106,19 @@ export function createCoach({ speak }) {
         : `${s.name}. Set ${s.set} of ${s.sets}. ${s.targetReps} reps at ${weight}.`, { force: true });
     },
 
-    /** Feed every analysed frame through here. Returns the cue it decided to speak, if any. */
+    /**
+     * Feed every analysed frame through here. Returns the cue to PUT ON SCREEN, if any.
+     *
+     * Showing and speaking are decided separately on purpose. They used to be one decision — the
+     * cue was displayed only if `say()` had not been throttled — which meant a fault detected
+     * inside the 1.2s after a rep number was announced was thrown away entirely, screen included.
+     * Since a rep number is announced on every rep and faults happen during reps, that quietly ate
+     * most of the coaching.
+     *
+     * step() reports a fault on exactly one frame, so a dropped cue is not retried. The screen is
+     * free — it costs nothing to be sure — while the voice stays throttled, because being talked
+     * over mid-rep is worse than silence.
+     */
     onFrame(result) {
       if (!result.visible) {
         say('I cannot see you. Step back into frame.', { throttleKey: 'novisible' });
@@ -118,8 +130,9 @@ export function createCoach({ speak }) {
       }
       // One correction at a time. Stacking cues mid-rep is noise, not coaching.
       const fault = result.faults[0];
-      if (fault && say(fault.cue, { throttleKey: fault.id })) return fault.cue;
-      return null;
+      if (!fault) return null;
+      say(fault.cue, { throttleKey: fault.id });
+      return fault.cue;
     },
 
     /**
@@ -223,27 +236,80 @@ export function createCoach({ speak }) {
   };
 }
 
-/** Browser speech. iOS will not speak until an utterance is fired inside a user gesture,
- *  hence unlock() on the Start button. */
+/**
+ * Browser speech, defensively.
+ *
+ * Three separate things silence speechSynthesis on Android, and the obvious implementation trips
+ * all of them:
+ *
+ *   1. cancel() immediately followed by speak() in the same tick drops the utterance outright on
+ *      Chrome and Android WebView. So cancel only when something is actually speaking, and let the
+ *      new utterance start on the next turn of the loop.
+ *   2. getVoices() is populated asynchronously and is empty on the first call. Speaking before it
+ *      fills can produce nothing at all, so an explicit voice is chosen once they arrive.
+ *   3. A device with no TTS engine has speechSynthesis and accepts speak() while making no sound,
+ *      ever, silently. `working` reports what actually happened — an utterance that reaches
+ *      onstart proves audio, and nothing reaching onstart after several tries proves the opposite.
+ *      Silence the lifter cannot explain is worse than no voice at all.
+ *
+ * iOS additionally refuses to speak until an utterance is fired inside a user gesture, hence
+ * unlock() on the Start button.
+ */
 export function createVoice() {
   let enabled = true;
+  let voice = null;
+  let attempts = 0;
+  let started = 0;
   const synth = globalThis.speechSynthesis;
+
+  const pickVoice = () => {
+    const all = synth?.getVoices?.() ?? [];
+    if (!all.length) return;
+    // Prefer the device's own language, then anything English, then whatever exists.
+    const lang = (globalThis.navigator?.language ?? 'en').toLowerCase();
+    voice = all.find((v) => v.lang?.toLowerCase() === lang)
+      ?? all.find((v) => v.lang?.toLowerCase().startsWith(lang.slice(0, 2)))
+      ?? all.find((v) => v.lang?.toLowerCase().startsWith('en'))
+      ?? all[0];
+  };
+
+  if (synth) {
+    pickVoice();
+    synth.addEventListener?.('voiceschanged', pickVoice);
+  }
+
   return {
     get enabled() { return enabled; },
     set enabled(v) { enabled = v; if (!v) synth?.cancel(); },
+
+    /** true = audio confirmed, false = tried and nothing ever started, null = not yet known. */
+    get working() {
+      if (!synth) return false;
+      if (started > 0) return true;
+      return attempts >= 3 ? false : null;
+    },
+
     unlock() {
       if (!synth) return;
+      pickVoice();
       const u = new SpeechSynthesisUtterance(' ');
       u.volume = 0;
       synth.speak(u);
     },
+
     speak(text) {
       if (!enabled || !synth) return;
-      synth.cancel();
+      // Only interrupt something that is actually mid-sentence; a bare cancel() before every
+      // utterance is what swallows them.
+      if (synth.speaking || synth.pending) synth.cancel();
       const u = new SpeechSynthesisUtterance(text);
+      if (voice) u.voice = voice;
       u.rate = 1.15;
       u.pitch = 1;
-      synth.speak(u);
+      u.onstart = () => { started += 1; };
+      attempts += 1;
+      // Next tick, so the cancel above has landed before this is queued.
+      setTimeout(() => synth.speak(u), 0);
     },
   };
 }
