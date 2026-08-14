@@ -15,6 +15,8 @@ import * as nutrition from './nutrition.js';
 import * as planner from './planner.js';
 import * as store from './store.js';
 import * as technique from './technique.js';
+// Wires its own listeners on import; app.js only has to show the sheet and ask it to paint.
+import * as mood from './mood.js';
 
 const $ = (id) => document.getElementById(id);
 const el = {
@@ -27,6 +29,8 @@ const el = {
   today: $('sheet-today'), todayDay: $('today-day'), todayName: $('today-name'),
   todayList: $('todaylist'), todayNote: $('today-note'),
   btnBrowse: $('btn-browse'), btnProfile: $('btn-profile'), btnProgress: $('btn-progress'),
+  mind: $('sheet-mind'), mindCheck: $('mind-check'),
+  btnMind: $('btn-mind'), btnMindBack: $('btn-mind-back'),
   progress: $('sheet-progress'), progressBody: $('progress-body'), progressDyn: $('progress-dyn'),
   btnDevcheck: $('btn-devcheck'), btnDevcheckBack: $('btn-devcheck-back'),
   devcheck: $('sheet-devcheck'), devcheckEx: $('devcheck-ex'), devcheckOut: $('devcheck-out'),
@@ -305,7 +309,9 @@ function renderPicker() {
   renderList();
 }
 
-const SHEETS = () => [el.today, el.profile, el.picker, el.setup, el.rest, el.settings, el.progress, el.eat, el.boxing, el.devcheck];
+// mindCheck is in here so that leaving Mind mid-questionnaire closes it rather than leaving it
+// hanging over whatever you opened next.
+const SHEETS = () => [el.today, el.profile, el.picker, el.setup, el.rest, el.settings, el.progress, el.eat, el.boxing, el.devcheck, el.mind, el.mindCheck];
 
 // ── developer data validation (P0.5) ─────────────────────────────────────────────────────
 // Not a product screen. Renders devcheck.inspect() as plain text — see devcheck.js for the logic;
@@ -1613,6 +1619,8 @@ el.btnPickerBack.addEventListener('click', showToday);
 el.btnBrowse.addEventListener('click', showPicker);
 el.btnProfile.addEventListener('click', showProfile);
 el.btnProgress.addEventListener('click', showProgress);
+el.btnMind.addEventListener('click', () => { show(el.mind); mood.render(); });
+el.btnMindBack.addEventListener('click', showToday);
 el.btnProgressBack.addEventListener('click', showToday);
 el.btnProgressDone.addEventListener('click', showToday);
 el.btnProfileBack.addEventListener('click', () => (planner.hasProfile() ? showToday() : null));

@@ -1,6 +1,6 @@
 {
-  "name": "Trainer",
-  "short_name": "Trainer",
+  "name": "You",
+  "short_name": "You",
   "start_url": "./",
   "display": "standalone",
   "orientation": "portrait",

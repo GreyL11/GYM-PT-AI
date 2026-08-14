@@ -10,6 +10,15 @@ const blank = {
   // Boxing rounds live apart from `log`. That array is set-shaped — reps, load, target — and a
   // round has none of those; forcing it in would mean every lifting analytic had to filter it out.
   rounds: [],
+  // ── Mind ───────────────────────────────────────────────────────────────────────────────
+  // One row per day keyed 'YYYY-MM-DD': mood, sleep, and that day's plans. Kept together because
+  // they are all answers to "how did today go", and read as one row on every screen that uses
+  // them. Deliberately NOT merged into `log` — that array is set-shaped, and a day is not a set.
+  days: {},
+  // PHQ-9 / GAD-7 results. Fortnightly, so this stays short for years.
+  checks: [],
+  // The check-in conversation. Separate from `log` for the same reason `rounds` is.
+  chat: [],
 };
 
 export function appendRound(entry) {
@@ -142,7 +151,8 @@ export function importAll(text) {
   }
   const data = parsed?.data ?? parsed;
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('That is not a backup.');
-  for (const [key, shape] of [['log', Array], ['meals', Array], ['weights', Array], ['loads', Object]]) {
+  for (const [key, shape] of [['log', Array], ['meals', Array], ['weights', Array], ['loads', Object],
+    ['chat', Array], ['checks', Array], ['days', Object]]) {
     if (key in data && (shape === Array ? !Array.isArray(data[key]) : typeof data[key] !== 'object')) {
       throw new Error(`Backup is damaged: "${key}" is the wrong shape.`);
     }
@@ -150,6 +160,51 @@ export function importAll(text) {
   localStorage.setItem(KEY, JSON.stringify({ ...blank, ...data }));
   return { ...blank, ...data };
 }
+
+// ── mind ─────────────────────────────────────────────────────────────────────────────────
+// Mood, sleep, plans, the check-in conversation, and the fortnightly screeners.
+
+/** Local date, not UTC — a check-in at 1am belongs to the day you think it does. */
+export const dayKey = (d = new Date()) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+export const shiftKey = (n, from = new Date()) =>
+  dayKey(new Date(from.getFullYear(), from.getMonth(), from.getDate() + n));
+
+const emptyDay = { mood: null, bed: '', wake: '', plans: [] };
+
+export const days = () => read().days;
+
+export const day = (key = dayKey()) => ({ ...emptyDay, ...(read().days[key] ?? {}) });
+
+export function patchDay(patch, key = dayKey()) {
+  const next = { ...read().days, [key]: { ...day(key), ...patch } };
+  // ~14 months. Long enough to see a seasonal pattern, short enough to stay small.
+  const keys = Object.keys(next).sort().slice(-420);
+  write({ days: Object.fromEntries(keys.map((k) => [k, next[k]])) });
+}
+
+export const chat = () => read().chat;
+
+export function appendChat(role, content) {
+  const entry = { role, content, at: new Date().toISOString() };
+  write({ chat: [...read().chat, entry].slice(-200) });
+  return entry;
+}
+
+/** The slice the model gets. `at` is ours, not the API's — strip it. */
+export const recentChat = (n = 30) =>
+  read().chat.slice(-n).map(({ role, content }) => ({ role, content }));
+
+export const clearChat = () => write({ chat: [] });
+
+export const checks = () => read().checks;
+
+export function appendCheck(entry) {
+  write({ checks: [...read().checks, { at: new Date().toISOString(), ...entry }] });
+}
+
+export const lastCheck = (kind) => [...read().checks].reverse().find((c) => c.kind === kind) ?? null;
 
 export function appendWeight(kg, at = new Date().toISOString()) {
   const day = new Date(at).toDateString();

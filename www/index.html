@@ -7,7 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>Trainer</title>
+<title>You</title>
 <link rel="manifest" href="manifest.json">
 <link rel="stylesheet" href="vendor/fonts/fonts.css">
 <style>
@@ -567,7 +567,69 @@
     font: 700 11px/14px var(--mono); letter-spacing: .08em;
   }
   .tabs button .ic { font-size: 20px; line-height: 22px; }
-  /* No current-tab state: the bar only exists on the home screen, so none of them is ever "on". */
+  /* The home bar has no current-tab state — it only exists on the home screen, so none of them is
+     ever "on". Mind's own sub-tabs are a different case: you stay on that sheet and move between
+     three views, so there it has to show which one you are looking at. */
+  .tabs button.on { border-top-color: var(--train); color: var(--on-surface); }
+
+  /* ── mind ────────────────────────────────────────────────────────────────────────────── */
+  /* Talk is the one panel that does not scroll as a whole: the composer has to stay under your
+     thumb while the transcript moves behind it, so the scrolling is handed to #mind-scroll. */
+  #mind-panel-talk { overflow: hidden; }
+  #mind-scroll { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+  .msg { max-width: 88%; padding: 11px 15px; border-radius: 18px; white-space: pre-wrap; font: 400 16px/23px var(--sans); }
+  .msg.user { align-self: flex-end; background: var(--neon); color: var(--on-neon); border-bottom-right-radius: 4px; }
+  .msg.assistant { align-self: flex-start; background: var(--sc-high); border-bottom-left-radius: 4px; }
+  .msg.error { align-self: center; background: none; color: var(--on-surface-variant); font-size: 14px; text-align: center; }
+
+  #mind-composer { display: flex; gap: 10px; align-items: flex-end; width: 100%; }
+  #mind-input {
+    flex: 1; resize: none; max-height: 120px; padding: 12px 14px; border-radius: 20px;
+    background: var(--sc-high); color: var(--on-surface); border: 1px solid var(--outline-variant);
+    font: 400 16px/22px var(--sans);
+  }
+  #mind-input:focus { outline: none; border-color: var(--neon); }
+  #mind-send { min-height: 48px; border-radius: 20px; flex: 0 0 auto; }
+  .crisis { color: var(--on-surface-variant); font: 400 12px/16px var(--sans); text-align: center; margin: 8px 0 0; }
+  .crisis a { color: inherit; }
+
+  .moods { display: flex; gap: 6px; }
+  .moods button { flex: 1; min-height: 52px; padding: 0; font-size: 22px; }
+  .moods button.on { background: var(--neon); border-color: var(--neon); }
+
+  .whenrow { display: flex; gap: 12px; }
+  .whenrow label { flex: 1; color: var(--on-surface-variant); font: 700 11px/16px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+  input[type=time] {
+    width: 100%; margin-top: 6px; min-height: 48px; padding: 0 12px; background: var(--sc-high);
+    color: var(--on-surface); border: 1px solid var(--outline-variant); border-radius: 2px;
+    font: 500 16px/22px var(--sans);
+  }
+
+  ul.plans { list-style: none; margin: 0; padding: 0; }
+  ul.plans li { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--outline-variant); }
+  ul.plans li:first-child { border-top: 0; }
+  ul.plans input[type=checkbox] { width: 24px; height: 24px; accent-color: var(--neon); flex: 0 0 auto; }
+  ul.plans span { flex: 1; font: 400 16px/22px var(--sans); }
+  ul.plans li.done span { color: var(--on-surface-variant); text-decoration: line-through; }
+  ul.plans button { min-height: 34px; padding: 0 10px; font-size: 11px; }
+  .adder { display: flex; gap: 10px; }
+  .adder input[type=text] { min-height: 48px; }
+  .adder button { min-height: 48px; flex: 0 0 auto; }
+
+  svg.moodspark { width: 100%; height: 70px; display: block; }
+  svg.moodspark polyline { fill: none; stroke: var(--neon); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+  svg.moodspark line { stroke: var(--outline-variant); stroke-width: 1; }
+
+  .q { margin-bottom: 22px; }
+  .q p { margin: 0 0 10px; font: 400 16px/23px var(--sans); }
+  .q .opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .q .opts button { min-height: 46px; padding: 0 8px; font-size: 11px; }
+  .q .opts button.on { background: var(--neon); border-color: var(--neon); color: var(--on-neon); }
+  #mind-risk {
+    background: #3a0a16; border: 1px solid var(--neon); border-radius: 16px; padding: 16px; margin-bottom: 20px;
+  }
+  #mind-risk strong { display: block; margin-bottom: 8px; font-size: 17px; }
+  #mind-risk a { color: var(--neon); }
 
   input[type=text] {
     width: 100%; min-height: 52px; padding: 0 14px; background: var(--sc-high); color: var(--on-surface);
@@ -662,7 +724,7 @@
 
   <!-- today's plan — the landing screen once a profile exists -->
   <section class="sheet" id="sheet-today" hidden>
-    <header><div class="brand">Trainer</div></header>
+    <header><div class="brand">You</div></header>
     <div class="body">
       <!-- A page, not a dashboard. Every fitness app is two tiles over a stat strip; this one is
            set like print — a masthead, a running order, a rule, a footnote. Hairlines and space do
@@ -713,6 +775,7 @@
     <div class="foot tabs">
       <button id="btn-browse"><span class="ic">&#127947;</span>Lifts</button>
       <button id="btn-eat-tab"><span class="ic">&#127858;</span>Eat</button>
+      <button id="btn-mind"><span class="ic">&#127807;</span>Mind</button>
       <button id="btn-progress"><span class="ic">&#128200;</span>Stats</button>
       <button id="btn-profile"><span class="ic">&#128100;</span>Me</button>
     </div>
@@ -950,7 +1013,7 @@
   <section class="sheet" id="sheet-picker" hidden>
     <header>
       <button id="btn-picker-back" type="button">&larr;</button>
-      <div class="brand" style="flex:1;text-align:center">Trainer</div>
+      <div class="brand" style="flex:1;text-align:center">You</div>
       <div style="width:44px"></div>
     </header>
     <div id="disciplines"></div>
@@ -1026,7 +1089,7 @@
   <section class="sheet" id="sheet-setup" hidden>
     <header>
       <button id="btn-back" type="button">&larr;</button>
-      <div class="brand" style="flex:1;text-align:center">Trainer</div>
+      <div class="brand" style="flex:1;text-align:center">You</div>
       <div style="width:44px"></div>
     </header>
     <div class="body">
@@ -1101,6 +1164,108 @@
   </section>
 
   <!-- adjust -->
+  <!-- mind -->
+  <section class="sheet" id="sheet-mind" hidden>
+    <header>
+      <button id="btn-mind-back" type="button">&larr;</button>
+      <div class="brand" style="flex:1;text-align:center;font-size:24px">Mind</div>
+      <div style="width:44px"></div>
+    </header>
+
+    <!-- talk -->
+    <div class="body" id="mind-panel-talk">
+      <div id="mind-scroll"></div>
+      <div class="card" id="mind-setup" hidden>
+        <span class="cardlabel" style="color:var(--train)">Set up</span>
+        <p class="muted">The check-in talks to Gemini straight from this phone. Paste a key and it
+          stays on the device in plain text — anyone holding the unlocked phone can read it, so set
+          a spend limit on it. Everything else on this screen works without one.</p>
+        <input type="password" id="mind-key" placeholder="AIza…" autocomplete="off" spellcheck="false">
+        <button id="mind-save-key" class="train" type="button">Save key</button>
+      </div>
+      <form id="mind-composer">
+        <textarea id="mind-input" rows="1" placeholder="How was today?" autocomplete="off"></textarea>
+        <button id="mind-send" class="train" type="submit">Send</button>
+      </form>
+      <p class="crisis">Rough night? Tele-MANAS <b>14416</b> · <a href="https://findahelpline.com">findahelpline.com</a></p>
+    </div>
+
+    <!-- day -->
+    <div class="body" id="mind-panel-day" hidden style="display:flex;flex-direction:column;gap:var(--stack)">
+      <div class="card" id="mind-due" hidden style="border-color:var(--neon)">
+        <span class="cardlabel" style="color:var(--train)">Fortnightly check</span>
+        <p class="muted" id="mind-due-text"></p>
+        <button id="mind-start-check" class="train" type="button">Start</button>
+      </div>
+
+      <div class="card">
+        <span class="cardlabel" style="color:var(--train)">Mood</span>
+        <p class="muted">Worst to best. One tap, no explanation needed.</p>
+        <div class="moods" id="mind-moods"></div>
+      </div>
+
+      <div class="card">
+        <span class="cardlabel" style="color:var(--train)">Sleep</span>
+        <p class="muted">Same wake time every day is the part that does the work.</p>
+        <div class="whenrow">
+          <label>Asleep<input type="time" id="mind-bed"></label>
+          <label>Awake<input type="time" id="mind-wake"></label>
+        </div>
+        <p class="muted data" id="mind-slept"></p>
+      </div>
+
+      <div class="card">
+        <span class="cardlabel" style="color:var(--train)">Today's plan</span>
+        <p class="muted">Doing the thing lifts the mood. Waiting to feel like it doesn't.</p>
+        <ul class="plans" id="mind-plans-today"></ul>
+      </div>
+
+      <div class="card">
+        <span class="cardlabel" style="color:var(--train)">Tomorrow</span>
+        <p class="muted">Two or three, specific. "Walk to the shop at 7", not "get outside more".</p>
+        <ul class="plans" id="mind-plans-tomorrow"></ul>
+        <form class="adder" id="mind-add-plan">
+          <input type="text" id="mind-plan-text" placeholder="One small thing" autocomplete="off">
+          <button class="train" type="submit">Add</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- trends -->
+    <div class="body" id="mind-panel-trends" hidden style="display:flex;flex-direction:column;gap:var(--stack)">
+      <div id="mind-trends" style="display:flex;flex-direction:column;gap:var(--stack)"></div>
+    </div>
+
+    <div class="foot tabs">
+      <button id="mind-tab-talk"><span class="ic">&#128172;</span>Talk</button>
+      <button id="mind-tab-day"><span class="ic">&#9728;</span>Today</button>
+      <button id="mind-tab-trends"><span class="ic">&#128200;</span>Trends</button>
+    </div>
+  </section>
+
+  <!-- PHQ-9 / GAD-7. Its own sheet rather than a panel: once it is open the only thing to do is
+       finish it or back out, and the tab bar would just be a way to lose your answers. -->
+  <section class="sheet" id="mind-check" hidden>
+    <header>
+      <button id="mind-check-cancel" type="button">&larr;</button>
+      <div class="brand" style="flex:1;text-align:center;font-size:24px" id="mind-check-name"></div>
+      <div style="width:44px"></div>
+    </header>
+    <div class="body">
+      <p class="muted" id="mind-check-about"></p>
+      <div id="mind-risk" hidden>
+        <strong>That last answer matters more than the score.</strong>
+        Please tell a person, not an app — someone you trust, your doctor, or a crisis line.
+        Tele-MANAS <b>14416</b>, KIRAN <b>1800-599-0019</b>,
+        or <a href="https://findahelpline.com">findahelpline.com</a>.
+      </div>
+      <div id="mind-questions"></div>
+    </div>
+    <div class="foot">
+      <button class="primary" id="mind-check-save">Save</button>
+    </div>
+  </section>
+
   <section class="sheet" id="sheet-settings" hidden>
     <header>
       <button id="btn-close-settings" type="button">&larr;</button>

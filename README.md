@@ -1,14 +1,22 @@
-# Trainer
+# You
+
+Three things you look after, in one app: **Lifts**, **Eat**, **Mind**.
 
 Live form checking and session coaching for squat, bench press, skullcrusher and cable pushdown.
 Pose estimation runs on-device — camera frames never leave the phone. No server, no account, no
-network needed once installed.
+network needed once installed. The one exception is the Mind check-in, which is the only screen
+that talks to anything (see below) and works without it.
+
+The repo directory is still `gym-trainer` and the Android package is still `com.jaswanth.trainer`
+— renaming the package would make Android treat it as a different app, so you would install fresh
+and lose your training history.
 
 ## Get the APK
 
 On the phone, open [releases/latest](https://github.com/GreyL11/GYM-PT-AI/releases/latest) and tap
-`trainer.apk`. Chrome warns about the file type — download anyway, tap it, and allow installs from
-Chrome when Android asks.
+`you.apk`. Chrome warns about the file type — download anyway, tap it, and allow installs from
+Chrome when Android asks. Builds up to `build-8` are named `trainer.apk`; it is the same app and
+installs over the top, since the package id has not changed.
 
 Every push to `main` (or a manual run of the **Build APK** workflow) publishes a new release.
 
@@ -58,6 +66,38 @@ The targets are a starting guess in exactly the way starting loads are. What cor
 **Coach** card: bodyweight against calories over 28 days. Log your weight (it is the same field in
 your profile that scales your lifts) and it will tell you when the two numbers disagree — including
 when the honest answer is "you are eating more than you are logging".
+
+## Mind
+
+A notebook with a voice, not therapy and not a therapist. Three panels under the **Mind** tab.
+
+**Talk** — an end-of-day check-in that streams from Gemini and remembers the conversation. This is
+the only part of the app that uses the network, and the only part that needs a key: paste one into
+the setup card and it is stored on the device in plain text, so set a spend limit on it. Everything
+else on this screen works without a key. Swapping provider is `www/chat.js` and nothing else — no
+other file knows what is behind the chat.
+
+The chat is the *interface*. What has evidence behind it is the rest:
+
+**Today** — mood 1–5, sleep, and the day's plans. Plan two or three specific things the night
+before, tick them off the next day. That loop (behavioural activation) is the highest-evidence
+thing an app like this can actually deliver, which is why the placeholder says "walk to the shop at
+7" rather than "get outside more". Fixed wake time is the part of the sleep card that does the
+work.
+
+**Trends** — 30-day mood line, and the difference in average mood on days you trained, slept 7h+,
+or did what you planned. **Days you trained is read straight off your lifting log** — that is the
+reason this lives in the trainer instead of being its own app. Every comparison stays grey until
+there are at least four logged days on both sides; the alternative is an app confidently telling
+you something it invented from three data points.
+
+Every fortnight Today offers a **PHQ-9**. It is a screener, not a diagnosis. It exists so the rest
+can be judged — without a number that moves you will keep whichever feature felt nicest rather than
+the one that helped. Answering item 9 above zero surfaces help immediately, whatever the total says.
+
+Crisis numbers are hard-coded to India (Tele-MANAS 14416, KIRAN 1800-599-0019) plus
+findahelpline.com, in four places: under the composer and in the risk panel in `index.html`, and in
+the system prompt and `BLOCKED_REPLY` in `chat.js`. Change all four if you are somewhere else.
 
 ## Back it up
 
@@ -116,8 +156,12 @@ DOM, no MediaPipe — specifically so this stays runnable. CI runs it before bui
 | `www/nutrition.js` | Macro targets, the food table, the day's log, the 28-day coach read |
 | `www/technique.js` | How to perform each lift — the spoken brief and the "How to" panel |
 | `www/pose.js` | Camera and MediaPipe Pose Landmarker; skeleton drawing |
+| `www/mood_insights.js` | Mind's arithmetic: mood vs training, sleep, plans. Pure, `insights.js`'s sibling |
+| `www/checks.js` | PHQ-9 / GAD-7 items, scoring, and the item-9 rule |
+| `www/chat.js` | Gemini call, SSE parsing, the check-in system prompt. The only networked file |
+| `www/mood.js` | Mind display wiring |
 | `www/app.js` | Wiring, HUD, settings sliders, wake lock |
-| `www/store.js` | localStorage: loads, thresholds, set log, meals, bodyweight |
+| `www/store.js` | localStorage: loads, thresholds, set log, meals, bodyweight, mood days, checks, chat |
 | `www/vendor/` | MediaPipe wasm + pose model. Generated, gitignored |
 | `android/` | Capacitor shell. Regenerate with `npx cap add android` |
 | `vendor.mjs` | Rebuilds `www/vendor/` |
