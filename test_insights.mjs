@@ -21,7 +21,8 @@ const daysAgo = (n) => new Date(NOW - n * DAY).toISOString();
 function seed(records) {
   mem.set('gym-trainer/v1', JSON.stringify({ loads: {}, thresholds: {}, log: records, profile: null }));
 }
-const set = (exId, at, load, reps, faults = {}) => ({ at, exId, load, reps, target: reps, faults });
+const set = (exId, at, load, reps, faults = {}, faultEvents = []) =>
+  ({ at, exId, load, reps, target: reps, faults, faultEvents });
 
 const ok = [];
 const check = (name, fn) => { fn(); ok.push(name); };
@@ -138,6 +139,147 @@ check('summary survives an empty log and ranks lifts when there is one', () => {
   assert.equal(s.lifts[0].exId, 'squat', 'the most-trained lift leads');
   assert.ok(s.lifts[0].strength.current > 60);
   assert.equal(s.lifts.find((l) => l.exId === 'curl').topFault.id, 'swing');
+});
+
+// ── movement intelligence: rep-indexed fault patterns ────────────────────────────────────
+
+check('faultTimeline refuses to report anything below the evidence floor', () => {
+  seed([
+    set('squat', daysAgo(3), 80, 5, {}, [{ rep: 5, id: 'valgus' }]),
+    set('squat', daysAgo(1), 80, 5, {}, [{ rep: 5, id: 'valgus' }]),
+  ]);
+  const t = insights.faultTimeline('squat', 'valgus');
+  assert.equal(t.status, 'insufficient evidence');
+  assert.equal(t.confidence, 0);
+  assert.equal(t.evidenceSets, 2, 'the sets ARE seen, just not enough to speak from');
+});
+
+check('a clean tracked set counts as evidence the fault did not occur', () => {
+  // This is the exact regression the fix caught: excluding clean-but-tracked sets from the
+  // denominator would have reported 2/2 = 1.0 confidence instead of the honest 2/5 = 0.4.
+  seed([
+    // 8-rep sets: an event at rep 6 is only "usable" evidence if the set itself claims >= 6 reps —
+    // this is the exact ceiling the P0.6 fix now enforces, so the fixture has to respect it too.
+    set('squat', daysAgo(5), 80, 8, {}, [{ rep: 6, id: 'valgus' }]),
+    set('squat', daysAgo(4), 80, 8, {}, []),
+    set('squat', daysAgo(3), 80, 8, {}, []),
+    set('squat', daysAgo(2), 82.5, 8, {}, [{ rep: 6, id: 'valgus' }]),
+    set('squat', daysAgo(1), 82.5, 8, {}, []),
+  ]);
+  const t = insights.faultTimeline('squat', 'valgus');
+  assert.equal(t.evidenceSets, 5, 'all five tracked sets count, clean or not');
+  assert.equal(t.matchingSets, 2);
+  assert.equal(t.confidence, 0.4);
+  assert.equal(t.status, 'occasional');
+  assert.equal(t.breakdownStartRep, 6);
+});
+
+check('a recurring fault crosses into "recurring" status, and a legacy set counts as neither hit nor miss', () => {
+  seed([
+    // Legacy shape: logged before faultEvents existed. No such key at all.
+    { at: daysAgo(9), exId: 'squat', load: 80, reps: 8, target: 8, faults: { valgus: 1 } },
+    set('squat', daysAgo(4), 80, 8, {}, [{ rep: 6, id: 'valgus' }]),
+    set('squat', daysAgo(3), 80, 8, {}, [{ rep: 7, id: 'valgus' }]),
+    set('squat', daysAgo(2), 80, 8, {}, [{ rep: 6, id: 'valgus' }]),
+    set('squat', daysAgo(1), 82.5, 8, {}, []),
+  ]);
+  const t = insights.faultTimeline('squat', 'valgus');
+  assert.equal(t.evidenceSets, 4, 'the legacy set is invisible here — not clean, not a miss, just unknown');
+  assert.equal(t.matchingSets, 3);
+  assert.equal(t.confidence, 0.75);
+  assert.equal(t.status, 'recurring');
+});
+
+check('topPatterns ranks by confidence and drops anything below the evidence floor', () => {
+  seed([
+    set('bench', daysAgo(5), 60, 5, {}, [{ rep: 4, id: 'flare' }]),
+    set('bench', daysAgo(4), 60, 5, {}, [{ rep: 4, id: 'flare' }, { rep: 5, id: 'wrist' }]),
+    set('bench', daysAgo(3), 60, 5, {}, [{ rep: 5, id: 'flare' }]),
+    set('bench', daysAgo(2), 60, 5, {}, []),
+    set('bench', daysAgo(1), 62.5, 5, {}, [{ rep: 4, id: 'flare' }]),
+  ]);
+  const top = insights.topPatterns('bench');
+  assert.equal(top[0].id, 'flare', 'flare fired in 4 of 5, wrist only 1 of 5 — flare must lead');
+  assert.ok(top[0].confidence > top.at(-1).confidence);
+  assert.ok(top.every((p) => p.status !== 'insufficient evidence'));
+});
+
+check('setBreakdown reads one set, flags whether the second half was worse, and stays quiet without real data', () => {
+  const degrading = set('squat', daysAgo(1), 80, 8, {}, [
+    { rep: 6, id: 'valgus' }, { rep: 7, id: 'valgus' }, { rep: 8, id: 'valgus' },
+  ]);
+  const b = insights.setBreakdown(degrading);
+  assert.equal(b.firstFaultRep, 6);
+  assert.equal(b.totalFaults, 3);
+  assert.equal(b.early, 0);
+  assert.equal(b.late, 3);
+  assert.equal(b.worsening, true);
+
+  assert.equal(insights.setBreakdown(set('squat', daysAgo(1), 80, 5, {}, [])), null, 'a clean set has nothing to report');
+  assert.equal(
+    insights.setBreakdown({ at: daysAgo(1), exId: 'squat', reps: 5, target: 5, faults: {} }),
+    null,
+    'an untracked legacy set is unknown, not clean',
+  );
+});
+
+// ── P0.6: evidence integrity across a rep correction ──────────────────────────────────────
+// coach.amendReps() never touches faultEvents — see MOVEMENT_INTELLIGENCE_DESIGN.md's
+// evidence-integrity addendum. A downward correction can leave an event referencing a rep beyond
+// the corrected count; every insights.js function must ignore that event for ANALYSIS while never
+// deleting it from the record. These seed `correctedFrom` directly, exactly as coach.js writes it.
+
+check('setBreakdown ignores a fault event beyond the corrected rep count, without deleting it', () => {
+  // Originally 5 reps, faults at 2 and 5. Corrected down to 3 — rep 5 no longer happened.
+  const corrected = {
+    ...set('squat', daysAgo(1), 80, 3, {}, [{ rep: 2, id: 'valgus' }, { rep: 5, id: 'valgus' }]),
+    target: 5, correctedFrom: 5,
+  };
+  const b = insights.setBreakdown(corrected);
+  assert.equal(b.totalFaults, 1, 'only the rep-2 event is usable evidence for a 3-rep set');
+  assert.equal(b.firstFaultRep, 2);
+  // Half of 3 reps is 1.5, so rep 2 is in the second half — correct, unrelated to the correction.
+  assert.equal(b.early, 0);
+  assert.equal(b.late, 1);
+  // The record itself is untouched — the rep-5 event is still sitting right there.
+  assert.equal(corrected.faultEvents.length, 2, 'nothing was deleted from the stored record');
+});
+
+check('an upward correction needs no special case — every original event is already in range', () => {
+  // Camera undercounted at 3; corrected up to 5. Nothing here could ever become "impossible".
+  const corrected = { ...set('squat', daysAgo(1), 80, 5, {}, [{ rep: 3, id: 'valgus' }]), target: 5, correctedFrom: 3 };
+  const b = insights.setBreakdown(corrected);
+  assert.equal(b.totalFaults, 1);
+  assert.equal(b.firstFaultRep, 3);
+});
+
+check('a corrected set with nothing usable left reports null, not a phantom breakdown', () => {
+  // Corrected down to 1 rep; the only recorded fault was at rep 5 — none of it survives.
+  const corrected = { ...set('squat', daysAgo(1), 80, 1, {}, [{ rep: 5, id: 'valgus' }]), target: 5, correctedFrom: 5 };
+  assert.equal(insights.setBreakdown(corrected), null);
+});
+
+check('faultTimeline and topPatterns only count a corrected set\'s usable events toward confidence', () => {
+  seed([
+    // Corrected from 5 down to 3: only the rep-2 event is usable; rep-5 must not count as a match.
+    { ...set('squat', daysAgo(4), 80, 3, {}, [{ rep: 2, id: 'valgus' }, { rep: 5, id: 'valgus' }]), target: 5, correctedFrom: 5 },
+    set('squat', daysAgo(3), 80, 5, {}, []),
+    set('squat', daysAgo(2), 80, 5, {}, []),
+  ]);
+  // The fault DID occur (rep 2), so it should still count as a match — correction trims the
+  // impossible part, it does not disqualify the whole set from being usable evidence.
+  const t = insights.faultTimeline('squat', 'valgus');
+  assert.equal(t.evidenceSets, 3);
+  assert.equal(t.matchingSets, 1);
+
+  const top = insights.topPatterns('squat');
+  assert.equal(top.find((p) => p.id === 'valgus')?.matchingSets, 1);
+});
+
+check('confirmedReps trusts a real reps value of zero rather than falling back to target', () => {
+  // Corrected all the way down to zero — a real, meaningful fact, not "no data".
+  const corrected = { ...set('squat', daysAgo(1), 80, 0, {}, [{ rep: 4, id: 'valgus' }]), target: 5, correctedFrom: 5 };
+  assert.equal(insights.setBreakdown(corrected), null, 'zero confirmed reps means zero usable evidence, target notwithstanding');
 });
 
 console.log(ok.map((n) => `  ok  ${n}`).join('\n'));

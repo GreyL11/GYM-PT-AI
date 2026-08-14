@@ -10,6 +10,7 @@ import {
   createBout, createBoutState, boxStep, boutAt, roundStats, trackingWarning,
 } from './boxing.js';
 import * as insights from './insights.js';
+import * as devcheck from './devcheck.js';
 import * as nutrition from './nutrition.js';
 import * as planner from './planner.js';
 import * as store from './store.js';
@@ -27,6 +28,8 @@ const el = {
   todayList: $('todaylist'), todayNote: $('today-note'),
   btnBrowse: $('btn-browse'), btnProfile: $('btn-profile'), btnProgress: $('btn-progress'),
   progress: $('sheet-progress'), progressBody: $('progress-body'), progressDyn: $('progress-dyn'),
+  btnDevcheck: $('btn-devcheck'), btnDevcheckBack: $('btn-devcheck-back'),
+  devcheck: $('sheet-devcheck'), devcheckEx: $('devcheck-ex'), devcheckOut: $('devcheck-out'),
   btnProgressBack: $('btn-progress-back'), btnProgressDone: $('btn-progress-done'),
   profile: $('sheet-profile'), inBw: $('in-bw'), inDays: $('in-days'),
   pExperience: $('p-experience'), pGoal: $('p-goal'), pEquipment: $('p-equipment'),
@@ -302,7 +305,30 @@ function renderPicker() {
   renderList();
 }
 
-const SHEETS = () => [el.today, el.profile, el.picker, el.setup, el.rest, el.settings, el.progress, el.eat, el.boxing];
+const SHEETS = () => [el.today, el.profile, el.picker, el.setup, el.rest, el.settings, el.progress, el.eat, el.boxing, el.devcheck];
+
+// ── developer data validation (P0.5) ─────────────────────────────────────────────────────
+// Not a product screen. Renders devcheck.inspect() as plain text — see devcheck.js for the logic;
+// this is display wiring only, which is why it has no dedicated tests (nothing here computes
+// anything, it just calls a tested pure function and drops the string into a <pre>).
+
+function renderDevcheck() {
+  const exId = el.devcheckEx.value;
+  el.devcheckOut.textContent = exId ? devcheck.render(devcheck.inspect(exId)) : 'No lift selected.';
+}
+
+function showDevcheck() {
+  show(el.devcheck);
+  const lifts = devcheck.trainedExercises();
+  el.devcheckEx.innerHTML = lifts.length
+    ? lifts.map((id) => `<option value="${id}">${EXERCISES[id]?.name ?? id}</option>`).join('')
+    : '<option value="">No training logged yet</option>';
+  renderDevcheck();
+}
+
+el.btnDevcheck.addEventListener('click', showDevcheck);
+el.btnDevcheckBack.addEventListener('click', () => show(el.progress));
+el.devcheckEx.addEventListener('change', renderDevcheck);
 
 // ── boxing ───────────────────────────────────────────────────────────────────────────────
 
@@ -1341,7 +1367,15 @@ function frame() {
       else if (mode === 'framing') onFramingFrame(out, lm);
       else if (live) {
         const cue = coach.onFrame(out);
-        if (cue) { showCue(cue); buzz([70, 60, 70]); }
+        if (cue) {
+          showCue(cue);
+          // coach.onFrame only returns a cue when out.faults[0] fired it, so this is the same
+          // fault object — safe to read severity straight off it. Matches the boxing path, which
+          // already did this correctly; gym lifts previously buzzed identically regardless of
+          // severity because the severity never reached this point at all (see the exercises.js
+          // fix this shipped alongside).
+          buzz(out.faults[0]?.severity === 'safety' ? [90, 60, 90] : [70, 60, 70]);
+        }
         el.repnum.textContent = String(out.reps);
         checkVoice();
       }

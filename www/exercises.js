@@ -769,6 +769,7 @@ export function createState() {
     tEnd: 0,          // ms timestamp they arrived at the finish position
     faultFrames: {},  // consecutive frames each fault has held
     faultCounts: {},  // total times each fault fired this set — feeds progression
+    faultEvents: [],  // {rep, id} per fault firing, in order — see insights.setBreakdown/faultTimeline
     repMs: [],        // duration of each completed rep; late reps slowing down is fatigue
     rejected: 0,      // movements too fast to be reps — kit being moved around, not lifting
     side: null,       // locked at the first visible frame; see step()
@@ -954,7 +955,15 @@ export function step(exId, frame, st, T) {
     st.faultFrames[f.id] = (st.faultFrames[f.id] ?? 0) + 1;
     if (st.faultFrames[f.id] === HOLD_FRAMES) {
       st.faultCounts[f.id] = (st.faultCounts[f.id] ?? 0) + 1;
-      faults.push({ id: f.id, cue: f.cue });
+      // `severity` was being computed (below, at module load) and then dropped here — every
+      // caller downstream (app.js's haptic buzz) had nothing to branch on, so a squat knee-valgus
+      // fault and a bench wrist-stacking fault buzzed identically. boxing.js already got this
+      // right; this brings gym lifts in line with it.
+      faults.push({ id: f.id, cue: f.cue, severity: f.severity });
+      // `st.reps` already holds completed reps at this point (the rep machine above runs first),
+      // so the rep in progress is st.reps + 1. This is the one thing that was being thrown away
+      // every frame — see MOVEMENT_INTELLIGENCE_DESIGN.md for why it matters.
+      st.faultEvents.push({ rep: st.reps + 1, id: f.id });
     }
   }
 

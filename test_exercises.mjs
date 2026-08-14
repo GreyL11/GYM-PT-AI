@@ -171,6 +171,47 @@ check('squat flags folding over, and heels coming up', () => {
   assert.ok(heels.faults.includes('heel'));
 });
 
+// ── movement intelligence: severity propagation, rep-indexed fault events ─────────────────
+// `f.severity` was computed at module load and stamped on the RULE (squat: torso/valgus are
+// 'safety'), but step() dropped it before it ever reached a caller — every gym-lift fault buzzed
+// identically regardless of severity. These check the fix directly against what step() returns,
+// not against the rule table, since the rule table was never the part that was broken.
+
+check('a fired fault carries its severity, not just an id and a cue', () => {
+  const st = createState();
+  const T = defaultThresholds('squat');
+  let seenTorso = null;
+  let seenHeel = null;
+  for (let i = 0; i < 6; i += 1) {
+    const out = step('squat', { lm: body({ kneeAngle: 120, lean: 62, heelLift: 0.10 }), w: body({ kneeAngle: 120, lean: 62, heelLift: 0.10 }), tMs: i * 100 }, st, T);
+    seenTorso ??= out.faults.find((f) => f.id === 'torso');
+    seenHeel ??= out.faults.find((f) => f.id === 'heel');
+  }
+  assert.equal(seenTorso?.severity, 'safety', 'folding over a loaded squat is a safety fault, not a style note');
+  assert.equal(seenHeel?.severity, 'efficiency', 'heels lifting is technique, not injury risk');
+});
+
+check('a fault event records which rep it happened on, not just that it happened', () => {
+  const down = (lean) => [170, 150, 130, 110, ...Array(5).fill(90)]
+    .map((a) => body({ kneeAngle: a, hipY: a < 120 ? 0.55 : 0.22, lean }));
+  const up = (lean) => [110, 130, 150, ...Array(6).fill(170)]
+    .map((a) => body({ kneeAngle: a, hipY: a < 120 ? 0.55 : 0.22, lean }));
+
+  // Rep 1 clean, rep 2 folds over at the bottom. Only rep 2 should show up against 'torso'.
+  const frames = [...down(20), ...up(20), ...down(62), ...up(20)];
+  const r = run('squat', frames);
+  assert.equal(r.st.reps, 2, 'both reps should have completed');
+
+  const torsoEvents = r.st.faultEvents.filter((e) => e.id === 'torso');
+  assert.ok(torsoEvents.length > 0, 'the fold-over should have fired at least once');
+  assert.ok(torsoEvents.every((e) => e.rep === 2), `expected every torso event at rep 2, got ${JSON.stringify(torsoEvents)}`);
+});
+
+check('faultEvents is present but empty on a clean set, not absent', () => {
+  const clean = run('squat', hold(6, () => body({ kneeAngle: 120, lean: 20 })));
+  assert.deepEqual(clean.st.faultEvents, [], 'no faults fired, but the field itself must still exist for insights.js to read');
+});
+
 check('knee cave-in only fires when the camera is actually front-on', () => {
   const caving = () => body({ kneeAngle: 120, spread: 0.10, kneeSpread: 0.02 });
   assert.ok(run('squat', hold(6, caving), { view: 'front' }).faults.includes('valgus'));

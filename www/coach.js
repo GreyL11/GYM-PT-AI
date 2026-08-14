@@ -171,6 +171,10 @@ export function createCoach({ speak }) {
         load: current.load,
         faults: { ...st.faultCounts },
         repMs: (st.repMs ?? []).map(Math.round),
+        // Additive, backward-compatible: every set logged before this shipped simply lacks the
+        // field. insights.js's pattern functions must treat that as "no data yet," never as
+        // "no faults happened" — see MOVEMENT_INTELLIGENCE_DESIGN.md.
+        faultEvents: [...(st.faultEvents ?? [])],
       };
       store.appendLog(record);
       exerciseSets.push(record);
@@ -184,12 +188,26 @@ export function createCoach({ speak }) {
       return { done, rest: current.rest, record, faults, slowdown, verdict: done ? this.preview() : null };
     },
 
-    /** Fix a miscount before it poisons the log, progression and the analytics. */
+    /**
+     * Fix a miscount before it poisons the log, progression and the analytics.
+     *
+     * `faultEvents` is never touched here, in either direction. A downward correction can leave
+     * an event referencing a rep that, per the corrected count, no longer happened — that is left
+     * exactly where it was, because it is a true fact about what the camera saw, not a mistake to
+     * erase. `correctedFrom` records the ORIGINAL reps count the first time this set is corrected,
+     * so anything reading the record later (insights.js, devcheck.js) can tell "this was corrected"
+     * from "this looks wrong" — see MOVEMENT_INTELLIGENCE_DESIGN.md's evidence-integrity addendum.
+     *
+     * Repeated taps (the rest screen's +/- can be pressed more than once) must not keep moving
+     * `correctedFrom` — it stays pinned to the value the camera originally counted, not the last
+     * intermediate one, which is why this only sets it when it is not already present.
+     */
     amendReps(delta) {
       const last = exerciseSets.at(-1);
       if (!last) return null;
+      if (last.correctedFrom === undefined) last.correctedFrom = last.reps;
       last.reps = Math.max(0, last.reps + delta);
-      store.amendLastSet({ reps: last.reps });
+      store.amendLastSet({ reps: last.reps, correctedFrom: last.correctedFrom });
       return { reps: last.reps, verdict: this.preview() };
     },
 

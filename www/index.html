@@ -371,6 +371,13 @@
   }
   .err { color: #ff8a80; margin: 0; font: 700 14px/20px var(--mono); }
 
+  /* devcheck: deliberately unstyled beyond legibility — a text dump, not a product screen */
+  #devcheck-out {
+    background: var(--sc-lowest); color: var(--on-surface); border: 1px solid var(--outline-variant);
+    border-radius: 2px; padding: 14px; font: 400 12px/17px var(--mono);
+    white-space: pre-wrap; word-break: break-word; overflow-y: auto;
+  }
+
   /* What to hang on the bar. Read at the rack with a bar in your hands, so it is the loudest
      instrument text on the screen after the weight itself. */
   .plateline {
@@ -805,7 +812,7 @@
     <header>
       <button id="btn-progress-back" type="button">&larr;</button>
       <div class="brand" style="flex:1;text-align:center;font-size:24px">Progress</div>
-      <div style="width:44px"></div>
+      <button id="btn-devcheck" type="button" style="font-size:11px" title="Developer: inspect raw faultEvents data">Data</button>
     </header>
     <div class="body" id="progress-body">
       <div class="card" id="trend-card">
@@ -822,6 +829,22 @@
       <div id="progress-dyn" style="display:flex;flex-direction:column;gap:var(--stack)"></div>
     </div>
     <div class="foot"><button id="btn-progress-done" class="primary">Done</button></div>
+  </section>
+
+  <!-- developer data validation (P0.5) — not a product screen, no polish intended -->
+  <section class="sheet" id="sheet-devcheck" hidden>
+    <header>
+      <button id="btn-devcheck-back" type="button">&larr;</button>
+      <div class="brand" style="flex:1;text-align:center;font-size:24px">Data</div>
+      <div style="width:44px"></div>
+    </header>
+    <div class="body">
+      <div class="row">
+        <label for="devcheck-ex">Lift</label>
+        <select id="devcheck-ex"></select>
+      </div>
+      <pre id="devcheck-out"></pre>
+    </div>
   </section>
 
   <!-- profile -->

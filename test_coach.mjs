@@ -19,7 +19,7 @@ const said = [];
 const newCoach = () => { said.length = 0; return createCoach({ speak: (t) => said.push(t) }); };
 const reset = () => mem.clear();
 /** A finished set, as exercises.js would leave it. */
-const setDone = (reps, faults = {}) => ({ reps, faultCounts: faults, repMs: [] });
+const setDone = (reps, faults = {}, faultEvents = []) => ({ reps, faultCounts: faults, repMs: [], faultEvents });
 
 const ok = [];
 const check = (name, fn) => { reset(); fn(); ok.push(name); };
@@ -99,6 +99,53 @@ check('correction cannot drive reps below zero', () => {
   assert.equal(a.reps, 0);
 });
 
+// ── P0.6: correctedFrom, the evidence-integrity metadata ──────────────────────────────────
+// amendReps() never touches faultEvents in either direction — see MOVEMENT_INTELLIGENCE_DESIGN.md.
+// It only records what the ORIGINAL confirmed rep count was, once, so anything reading the record
+// later can tell "this was corrected" from "this looks wrong".
+
+check('a downward correction records what reps ORIGINALLY were, on both the log and the return value', () => {
+  const coach = newCoach();
+  coach.select('squat', { sets: 1, reps: 5, load: 80, warmup: false });
+  coach.endSet(setDone(5, {}, [{ rep: 2, id: 'valgus' }, { rep: 5, id: 'valgus' }]));
+  coach.amendReps(-2);
+  const stored = store.read().log.at(-1);
+  assert.equal(stored.reps, 3);
+  assert.equal(stored.correctedFrom, 5, 'the pristine original, not the delta');
+  // Untouched, in both directions — this is the whole point.
+  assert.deepEqual(stored.faultEvents, [{ rep: 2, id: 'valgus' }, { rep: 5, id: 'valgus' }]);
+});
+
+check('repeated corrections keep the FIRST original value, not the last intermediate one', () => {
+  const coach = newCoach();
+  coach.select('bench', { sets: 1, reps: 5, load: 60, warmup: false });
+  coach.endSet(setDone(5));
+  coach.amendReps(-1); // 5 -> 4, correctedFrom should latch to 5
+  coach.amendReps(-1); // 4 -> 3, correctedFrom must NOT become 4
+  coach.amendReps(1);  // 3 -> 4
+  const stored = store.read().log.at(-1);
+  assert.equal(stored.reps, 4);
+  assert.equal(stored.correctedFrom, 5, 'the value before ANY correction, however many taps happened since');
+});
+
+check('an upward correction is recorded the same way — correction is not assumed to mean "downward"', () => {
+  const coach = newCoach();
+  coach.select('squat', { sets: 1, reps: 5, load: 80, warmup: false });
+  coach.endSet(setDone(3));
+  coach.amendReps(2);
+  const stored = store.read().log.at(-1);
+  assert.equal(stored.reps, 5);
+  assert.equal(stored.correctedFrom, 3);
+});
+
+check('an uncorrected set never gets a correctedFrom field at all', () => {
+  const coach = newCoach();
+  coach.select('squat', { sets: 1, reps: 5, load: 80, warmup: false });
+  coach.endSet(setDone(5));
+  const stored = store.read().log.at(-1);
+  assert.equal('correctedFrom' in stored, false, 'absent, not null — nothing here was ever amended');
+});
+
 check('bodyweight lifts progress on reps, since there is no weight to add', () => {
   const coach = newCoach();
   coach.select('pushup', { sets: 2, reps: 10, load: 0 });
@@ -171,6 +218,25 @@ check('the coach says the weight out loud, and says bodyweight when there is non
   c2.select('pushup', { sets: 1, reps: 10, load: 0 });
   c2.announceSet();
   assert.match(said.at(-1), /bodyweight/);
+});
+
+check('the stored record carries faultEvents through, not just the flat count', () => {
+  const coach = newCoach();
+  coach.select('squat', { sets: 1, reps: 5, load: 100, warmup: false });
+  coach.endSet(setDone(5, { torso: 2 }, [{ rep: 3, id: 'torso' }, { rep: 4, id: 'torso' }]));
+  const stored = store.read().log.at(-1);
+  assert.deepEqual(stored.faultEvents, [{ rep: 3, id: 'torso' }, { rep: 4, id: 'torso' }]);
+  // And the existing flat count — every OTHER consumer's input — is completely unaffected.
+  assert.deepEqual(stored.faults, { torso: 2 });
+});
+
+check('a legacy-shaped set with no faultEvents field logs cleanly, not a crash', () => {
+  const coach = newCoach();
+  coach.select('bench', { sets: 1, reps: 5, load: 60, warmup: false });
+  // Exactly what exercises.js produced before this field existed — no faultEvents key at all.
+  coach.endSet({ reps: 5, faultCounts: {}, repMs: [] });
+  const stored = store.read().log.at(-1);
+  assert.deepEqual(stored.faultEvents, [], 'missing input becomes an empty array, never undefined or a throw');
 });
 
 console.log(ok.map((n) => `  ok  ${n}`).join('\n'));
