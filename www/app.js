@@ -15,6 +15,7 @@ import * as nutrition from './nutrition.js';
 import * as planner from './planner.js';
 import * as store from './store.js';
 import * as technique from './technique.js';
+import * as tInputs from './t_inputs.js';
 // Wires its own listeners on import; app.js only has to show the sheet and ask it to paint.
 import * as mood from './mood.js';
 
@@ -988,6 +989,50 @@ function line(k, v, cls) {
   return row;
 }
 
+/**
+ * The three lifestyle inputs that move testosterone, read out of data already logged.
+ *
+ * There is no number here on purpose. Nothing on a phone measures a hormone, and a "T score" from
+ * sleep and training would be a fabrication with a decimal point on it. This says only whether
+ * you are doing the things that help — which is a smaller claim, and a true one.
+ */
+function renderTInputs(body) {
+  const { log, rounds, weights } = store.read();
+  const r = tInputs.read({ days: store.days(), weights, log, rounds }, store.dayKey, store.shiftKey);
+
+  const card = node('div', 'card');
+  card.append(node('span', 'cardlabel', `Testosterone inputs · ${tInputs.WINDOW} days`));
+
+  const row = (name, value, verdict) => {
+    const line = node('div', 'line');
+    line.append(node('span', 'k', name));
+    const v = node('span', 'v', value);
+    if (verdict === 'low') v.classList.add('warn');
+    if (verdict === 'good') v.classList.add('up');
+    if (verdict === 'unknown') v.classList.add('flat');
+    line.append(v);
+    card.append(line);
+  };
+
+  row('Sleep', r.sleep.verdict === 'unknown' ? `${r.sleep.nights} nights logged` : `${r.sleep.avg}h`, r.sleep.verdict);
+  row('Training days', String(r.training.days), r.training.verdict);
+  row(
+    'Weight',
+    r.weight.verdict === 'unknown' ? 'not enough weigh-ins' : `${r.weight.kg >= 0 ? '+' : '−'}${Math.abs(r.weight.kg)} kg`,
+    r.weight.verdict === 'unknown' ? 'unknown' : null,
+  );
+
+  if (r.headline) card.append(node('p', 'coachline', r.headline));
+
+  card.append(node('p', 'muted',
+    'These are inputs, not a reading. Nothing here measures testosterone — no app can, and one '
+    + 'that claims to is guessing. That is a morning blood test, twice, read by a doctor. Weight '
+    + 'is shown as direction only, because the evidence is about body fat and this app does not '
+    + 'know yours.'));
+
+  body.append(card);
+}
+
 function showProgress() {
   show(el.progress);
   const s = insights.summary();
@@ -997,6 +1042,9 @@ function showProgress() {
   renderCoach(planner.getProfile());
 
   renderEatStats(body);
+  // Before the early return below: this reads sleep and weight too, so it has something to say
+  // on a phone that has logged nights but not yet finished a set.
+  renderTInputs(body);
 
   if (!s.totalSets) {
     body.append(node('p', 'muted', 'Nothing logged yet. Finish a set and this fills up.'));
