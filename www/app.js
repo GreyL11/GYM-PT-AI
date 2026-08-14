@@ -1022,7 +1022,23 @@ function renderTInputs(body) {
     r.weight.verdict === 'unknown' ? 'unknown' : null,
   );
 
-  if (r.headline) card.append(node('p', 'coachline', r.headline));
+  if (r.advice.text) card.append(node('p', 'coachline', r.advice.text));
+
+  // Stats diagnoses, Mind acts, and until now they never spoke. Handing the plan straight to
+  // tomorrow's list closes the loop: flagged here, ticked there, and the input it was about
+  // moves on its own — which is the only way this card ever changes.
+  if (r.advice.plan) {
+    const key = store.shiftKey(1);
+    const planned = () => store.day(key).plans.some((p) => p.text === r.advice.plan);
+    const btn = node('button', 'train', planned() ? 'Already in tomorrow' : 'Add to tomorrow');
+    btn.disabled = planned();
+    btn.addEventListener('click', () => {
+      store.patchDay({ plans: [...store.day(key).plans, { text: r.advice.plan, done: false }] }, key);
+      btn.textContent = 'Added to tomorrow';
+      btn.disabled = true;
+    });
+    card.append(btn);
+  }
 
   card.append(node('p', 'muted',
     'These are inputs, not a reading. Nothing here measures testosterone — no app can, and one '

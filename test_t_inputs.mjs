@@ -3,7 +3,7 @@
 // verdict on a weight direction the data cannot justify.
 import assert from 'node:assert/strict';
 import {
-  read, sleep, weight, training, headline,
+  read, sleep, weight, training, advice, usualWake,
   WINDOW, SLEEP_TARGET, SLEEP_LOW, MIN_NIGHTS, TRAIN_LOW,
 } from './www/t_inputs.js';
 import { dayKey, shiftKey } from './www/store.js';
@@ -88,34 +88,56 @@ const nights = (n, bed, wake) => {
   assert.equal(training(sessions(10, 40), [], WINDOW, dayKey, shiftKey).days, 0);
 }
 
-// ── headline: one line, in priority order ────────────────────────────────────────────────
+// ── advice: one line, one plan, in priority order ────────────────────────────────────────
 {
-  const h = (s, t) => headline({ sleep: s, training: t, weight: { verdict: 'unknown' } });
+  const a = (s, t, wake = '06:00') => advice({ sleep: s, training: t, weight: { verdict: 'unknown' } }, wake);
 
-  // Low sleep outranks low training — best evidenced, most commonly short.
-  assert.match(h({ verdict: 'low', avg: 5.2 }, { verdict: 'low', days: 2 }), /5\.2h/);
-  assert.match(h({ verdict: 'good', avg: 7.5 }, { verdict: 'low', days: 3 }), /3 training days/);
-  assert.match(h({ verdict: 'under', avg: 6.4 }, { verdict: 'good', days: 12 }), /6\.4h/);
-  assert.match(h({ verdict: 'unknown', nights: 2 }, { verdict: 'good', days: 12 }), /2 nights/);
+  // Bad sleep outranks low training, and names a bedtime from the user's own wake time.
+  const bad = a({ verdict: 'low', avg: 5.2 }, { verdict: 'low', days: 2 });
+  assert.match(bad.text, /5\.2h/);
+  assert.match(bad.text, /23:00/, '06:00 wake minus the 7h target');
+  assert.equal(bad.plan, 'Lights off by 23:00');
 
-  // Nothing to flag says nothing, rather than inventing an improvement.
-  assert.equal(h({ verdict: 'good', avg: 7.8 }, { verdict: 'good', days: 14 }), null);
+  // A merely-short night does NOT outrank training on the floor.
+  const short = a({ verdict: 'under', avg: 6.4 }, { verdict: 'low', days: 2 });
+  assert.equal(short.plan, 'Train');
+  const shortOk = a({ verdict: 'under', avg: 6.4 }, { verdict: 'good', days: 12 });
+  assert.equal(shortOk.plan, 'Lights off by 23:00');
 
-  // A fresh install has zero of everything. "0 training days" there is a verdict drawn from
-  // absent data — it must say what to log instead of grading a month that never happened.
-  const blank = headline({
-    sleep: { verdict: 'unknown', nights: 0 },
-    training: { verdict: 'low', days: 0 },
-    weight: { verdict: 'unknown', points: 0 },
-  });
-  assert.match(blank, /Nothing logged yet/);
-  assert.doesNotMatch(blank, /0 training days/);
+  assert.equal(a({ verdict: 'good', avg: 7.5 }, { verdict: 'low', days: 3 }).plan, 'Train');
 
-  // But one logged session is data, so the training verdict is fair game again.
-  assert.match(
-    headline({ sleep: { verdict: 'unknown', nights: 0 }, training: { verdict: 'low', days: 1 }, weight: { verdict: 'unknown' } }),
-    /1 training days/,
-  );
+  // Bedtime wraps backwards over midnight rather than going negative.
+  assert.equal(a({ verdict: 'low', avg: 4 }, { verdict: 'good', days: 12 }, '04:30').plan, 'Lights off by 21:30');
+  assert.equal(a({ verdict: 'low', avg: 4 }, { verdict: 'good', days: 12 }, '02:00').plan, 'Lights off by 19:00');
+
+  // No wake time logged: no invented clock time, but still an action.
+  const noWake = a({ verdict: 'low', avg: 5 }, { verdict: 'good', days: 12 }, null);
+  assert.doesNotMatch(noWake.text, /\d\d:\d\d/, 'never states an hour it cannot compute');
+  assert.equal(noWake.plan, 'Lights off 45 minutes earlier');
+
+  // States that need data, not action, carry no plan.
+  assert.equal(a({ verdict: 'unknown', nights: 2 }, { verdict: 'good', days: 12 }).plan, null);
+  assert.equal(a({ verdict: 'good', avg: 7.8 }, { verdict: 'good', days: 14 }).text, null);
+
+  // A fresh install must not be graded on a month that never happened.
+  const blank = advice({ sleep: { verdict: 'unknown', nights: 0 }, training: { verdict: 'low', days: 0 },
+    weight: { verdict: 'unknown', points: 0 } }, null);
+  assert.match(blank.text, /Nothing logged yet/);
+  assert.doesNotMatch(blank.text, /0 training days/);
+  assert.equal(blank.plan, null, 'nothing to act on until something is logged');
+
+  // One logged session is data, so the training verdict is fair game again.
+  assert.equal(advice({ sleep: { verdict: 'unknown', nights: 0 }, training: { verdict: 'low', days: 1 },
+    weight: { verdict: 'unknown' } }, null).plan, 'Train');
+}
+
+// ── usualWake: median, so one early start does not move the target ───────────────────────
+{
+  const at = (i, wake) => ({ [shiftKey(-i)]: { wake } });
+  const days = Object.assign({}, at(0, '06:00'), at(1, '06:30'), at(2, '04:00'), at(3, '06:15'), at(4, '06:00'));
+  assert.equal(usualWake(days, WINDOW, shiftKey), '06:00', 'the 04:00 airport run is not the target');
+  assert.equal(usualWake({}, WINDOW, shiftKey), null);
+  assert.equal(usualWake(Object.assign({}, at(0, ''), at(1, 'nonsense')), WINDOW, shiftKey), null);
 }
 
 // ── composite ────────────────────────────────────────────────────────────────────────────
@@ -125,7 +147,7 @@ const nights = (n, bed, wake) => {
   assert.equal(empty.sleep.verdict, 'unknown');
   assert.equal(empty.weight.verdict, 'unknown');
   assert.equal(empty.training.days, 0);
-  assert.ok(empty.headline, 'a blank app still says what to do first');
+  assert.ok(empty.advice.text, 'a blank app still says what to do first');
 
   const full = read(
     { days: nights(20, '23:00', '07:00'), weights: [], log: [], rounds: [] },
@@ -134,7 +156,8 @@ const nights = (n, bed, wake) => {
   assert.equal(full.sleep.avg, 8);
   assert.equal(full.sleep.verdict, 'good');
   assert.equal(full.training.verdict, 'low');
-  assert.match(full.headline, /training days/);
+  assert.match(full.advice.text, /training days/);
+  assert.equal(full.advice.plan, 'Train');
 }
 
 console.log('t_inputs ok');
