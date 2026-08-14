@@ -9,6 +9,8 @@ const SHELL = [
   './', 'index.html', 'manifest.json', 'icon.svg',
   'app.js', 'pose.js', 'coach.js', 'exercises.js', 'store.js',
   'insights.js', 'planner.js', 'nutrition.js', 'technique.js', 'filter.js',
+  'boxing.js', 'devcheck.js',
+  'mood.js', 'mood_insights.js', 'checks.js', 'chat.js',
 ];
 
 self.addEventListener('install', (e) => {
