@@ -9,7 +9,15 @@
 // straight from the phone with no server in between. Use a key with a spend limit on it.
 
 const MODEL = 'gemini-2.5-flash';
-const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:streamGenerateContent?alt=sse`;
+const BASE = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}`;
+const ENDPOINT = `${BASE}:streamGenerateContent?alt=sse`;
+
+const headers = (apiKey) => ({
+  'content-type': 'application/json',
+  // Header, not the ?key= query parameter Google's docs lead with — a key in a URL ends up in
+  // logs, history, and referrers.
+  'x-goog-api-key': apiKey,
+});
 
 /**
  * The whole product is this string. Everything else is plumbing.
@@ -30,6 +38,8 @@ What you don't do:
 - Diagnose anything, name conditions, or comment on medication.
 - Tell them what they feel or why. Ask.
 - Promise things will be fine.
+
+They may also ask about the training, sleep, weight and mood the app tracks — the Stats screen can send you here with their own numbers. When it does: answer plainly, use only the numbers you were given, and say what the evidence actually supports. Never estimate a hormone level or any other number from a blood test, and never say whether someone's figures are normal, low or healthy — that is a doctor with a blood panel, and you should say so rather than guess. Skip the clinical register here too; explain it the way you would to a friend.
 
 If they mention wanting to hurt themselves, wanting to die, or not being safe, drop everything else. Say plainly that you're glad they told you and that this is bigger than a chat app. Point them at a real person: someone they trust, their doctor, or a crisis line — in India, Tele-MANAS on 14416 or KIRAN on 1800-599-0019; anywhere else, findahelpline.com. Then stay in the conversation with them. Don't lecture, and don't hand over a list and leave.`;
 
@@ -94,17 +104,55 @@ async function failure(res) {
   }
 }
 
+/**
+ * Rewrite one already-decided piece of advice as a sentence about this specific person.
+ *
+ * The model gets the conclusions, never the raw data, and never the decision. Every threshold,
+ * verdict and refusal in t_inputs.js is arithmetic that is tested, instant and works with no
+ * signal; handing any of that to a model would trade all four away, and would trade away the
+ * refusals in particular — asked to judge ten nights of sleep, a model will always judge them.
+ *
+ * So this is phrasing, and phrasing is the part models are actually good at. Returns null on any
+ * failure at all, because the caller already has a correct sentence on screen and a spinner that
+ * resolves to nothing is worse than a template.
+ */
+export async function phrase(apiKey, facts, signal) {
+  const system = `You write a single sentence for a card in a training app, from facts that have already been computed.
+
+Rules:
+- One sentence, under 30 words. No greeting, no sign-off, no emoji, no caveat.
+- Name the action you are given, and keep any clock time in it exactly as written.
+- Use only the numbers provided. Do not estimate, extrapolate or invent any figure.
+- Never mention testosterone levels, and never say whether anything is normal, low, healthy or a problem. You are naming a next step, not giving a verdict.
+- Speak to the person as "you". Direct and plain, no cheerleading.`;
+
+  try {
+    const res = await fetch(`${BASE}:generateContent`, {
+      method: 'POST',
+      signal,
+      headers: headers(apiKey),
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: system }] },
+        contents: [{ role: 'user', parts: [{ text: JSON.stringify(facts) }] }],
+        generationConfig: { maxOutputTokens: 120, thinkingConfig: { thinkingBudget: 0 } },
+      }),
+    });
+    if (!res.ok) return null;
+    const body = await res.json();
+    const text = (body.candidates?.[0]?.content?.parts ?? [])
+      .map((p) => p.text ?? '').join('').trim();
+    return text || null;
+  } catch {
+    return null;
+  }
+}
+
 /** Yields text as it arrives. `messages` is [{role, content}], oldest first. */
 export async function* talk(apiKey, messages, signal) {
   const res = await fetch(ENDPOINT, {
     method: 'POST',
     signal,
-    headers: {
-      'content-type': 'application/json',
-      // Header, not the ?key= query parameter Google's docs lead with — a key in a URL ends up in
-      // logs, history, and referrers.
-      'x-goog-api-key': apiKey,
-    },
+    headers: headers(apiKey),
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: SYSTEM }] },
       contents: toContents(messages),

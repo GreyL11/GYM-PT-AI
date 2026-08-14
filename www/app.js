@@ -16,6 +16,7 @@ import * as planner from './planner.js';
 import * as store from './store.js';
 import * as technique from './technique.js';
 import * as tInputs from './t_inputs.js';
+import { phrase } from './chat.js';
 // Wires its own listeners on import; app.js only has to show the sheet and ask it to paint.
 import * as mood from './mood.js';
 
@@ -1022,7 +1023,8 @@ function renderTInputs(body) {
     r.weight.verdict === 'unknown' ? 'unknown' : null,
   );
 
-  if (r.advice.text) card.append(node('p', 'coachline', r.advice.text));
+  const line = r.advice.text ? node('p', 'coachline', r.advice.text) : null;
+  if (line) card.append(line);
 
   // Stats diagnoses, Mind acts, and until now they never spoke. Handing the plan straight to
   // tomorrow's list closes the loop: flagged here, ticked there, and the input it was about
@@ -1040,6 +1042,12 @@ function renderTInputs(body) {
     card.append(btn);
   }
 
+  if (line) {
+    const ask = node('button', null, 'Ask why');
+    ask.addEventListener('click', () => { show(el.mind); mood.openTalk(question(r)); });
+    card.append(ask);
+  }
+
   card.append(node('p', 'muted',
     'These are inputs, not a reading. Nothing here measures testosterone — no app can, and one '
     + 'that claims to is guessing. That is a morning blood test, twice, read by a doctor. Weight '
@@ -1047,6 +1055,48 @@ function renderTInputs(body) {
     + 'know yours.'));
 
   body.append(card);
+  if (line) rephrase(r, line);
+}
+
+/** The facts the model is allowed to see: conclusions only, never the underlying log. */
+const factsFor = (r) => ({
+  windowDays: tInputs.WINDOW,
+  sleepAverageHours: r.sleep.avg ?? null,
+  nightsLogged: r.sleep.nights,
+  trainingDays: r.training.days,
+  weightChangeKg: r.weight.verdict === 'known' ? r.weight.kg : null,
+  action: r.advice.plan,
+  currentWording: r.advice.text,
+});
+
+/**
+ * Swap the template line for one written about this specific person.
+ *
+ * Fire-and-forget on purpose: the correct sentence is already on screen, so a slow or failed
+ * call costs nothing and shows nothing. Cached against the facts, so opening Stats four times in
+ * an evening is one request, not four.
+ */
+async function rephrase(r, line) {
+  const key = store.getSetting('geminiKey', '');
+  if (!key) return;
+  const facts = factsFor(r);
+  const cacheKey = JSON.stringify(facts);
+  const cached = store.getSetting('adviceCache', null);
+  if (cached?.key === cacheKey) { line.textContent = cached.text; return; }
+
+  const text = await phrase(key, facts);
+  if (!text) return; // template stays; never a spinner that resolves to nothing
+  store.setSetting('adviceCache', { key: cacheKey, text });
+  line.textContent = text;
+}
+
+/** Hands the check-in the same numbers, so "why" is answered about you and not in general. */
+function question(r) {
+  const bits = [];
+  if (r.sleep.avg != null) bits.push(`sleeping ${r.sleep.avg}h on average`);
+  bits.push(`${r.training.days} training days`);
+  if (r.weight.verdict === 'known') bits.push(`weight ${r.weight.kg >= 0 ? 'up' : 'down'} ${Math.abs(r.weight.kg)}kg`);
+  return `Last ${tInputs.WINDOW} days: ${bits.join(', ')}. The app says my next move is "${r.advice.plan ?? r.advice.text}". Why that one first?`;
 }
 
 function showProgress() {

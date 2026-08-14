@@ -38,6 +38,22 @@ for (const p of PANELS) {
   $(`mind-tab-${p}`).addEventListener('click', () => { panel = p; render(); });
 }
 
+/**
+ * Open the check-in with a question already typed — used by the Stats card's "Ask why".
+ *
+ * Deliberately does not send it. Each message costs a call and the words are the person's to
+ * change, so this puts them at the start of a sentence rather than mid-conversation.
+ */
+export function openTalk(prefill) {
+  panel = 'talk';
+  render();
+  const box = $('mind-input');
+  box.value = prefill;
+  box.style.height = 'auto';
+  box.style.height = `${box.scrollHeight}px`;
+  box.focus();
+}
+
 // ── talk ─────────────────────────────────────────────────────────────────────────────────
 
 // The transcript is also the scroll container — see the #mind-scroll rule in index.html.
