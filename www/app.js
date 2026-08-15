@@ -16,9 +16,11 @@ import * as planner from './planner.js';
 import * as store from './store.js';
 import * as technique from './technique.js';
 import * as tInputs from './t_inputs.js';
-import { phrase } from './chat.js';
+import { phrase, explain as askModel } from './chat.js';
+import * as explain from './explain.js';
 // Wires its own listeners on import; app.js only has to show the sheet and ask it to paint.
 import * as mood from './mood.js';
+import * as face from './face/checkin.js';
 
 const $ = (id) => document.getElementById(id);
 const el = {
@@ -33,6 +35,7 @@ const el = {
   btnBrowse: $('btn-browse'), btnProfile: $('btn-profile'), btnProgress: $('btn-progress'),
   mind: $('sheet-mind'), mindCheck: $('mind-check'),
   btnMind: $('btn-mind'), btnMindBack: $('btn-mind-back'),
+  btnFace: $('btn-face'), btnFaceBack: $('btn-face-back'), face: $('sheet-face'),
   progress: $('sheet-progress'), progressBody: $('progress-body'), progressDyn: $('progress-dyn'),
   btnDevcheck: $('btn-devcheck'), btnDevcheckBack: $('btn-devcheck-back'),
   devcheck: $('sheet-devcheck'), devcheckEx: $('devcheck-ex'), devcheckOut: $('devcheck-out'),
@@ -313,7 +316,7 @@ function renderPicker() {
 
 // mindCheck is in here so that leaving Mind mid-questionnaire closes it rather than leaving it
 // hanging over whatever you opened next.
-const SHEETS = () => [el.today, el.profile, el.picker, el.setup, el.rest, el.settings, el.progress, el.eat, el.boxing, el.devcheck, el.mind, el.mindCheck];
+const SHEETS = () => [el.today, el.profile, el.picker, el.setup, el.rest, el.settings, el.progress, el.eat, el.boxing, el.devcheck, el.mind, el.mindCheck, el.face];
 
 // ── developer data validation (P0.5) ─────────────────────────────────────────────────────
 // Not a product screen. Renders devcheck.inspect() as plain text — see devcheck.js for the logic;
@@ -497,6 +500,10 @@ function finishBout() {
 
 function show(sheet) {
   running = false;
+  // Every navigation in the app funnels through here, which makes it the only place a front
+  // camera cannot be left running by accident. Relying on the back button would mean any other
+  // route out — a tab, a deep link, the session finishing — leaves the light on.
+  if (sheet !== el.face) face.close();
   for (const s of SHEETS()) s.hidden = s !== sheet;
 }
 
@@ -1153,6 +1160,7 @@ function showProgress() {
     if (lift.topFault) {
       card.append(line('Weak point', `${lift.topFault.label} (${Math.round(lift.topFault.share * 100)}%)`, 'warn'));
     }
+    addDecision(card, lift.exId);
     body.append(card);
   }
 
@@ -1163,6 +1171,71 @@ function showProgress() {
     for (const x of s.faults) f.append(line(x.label, `${x.count}`, 'warn'));
     body.append(f);
   }
+}
+
+// ── why did it decide that? ──────────────────────────────────────────────────────────────
+//
+// Lives on the Progress card rather than the rest screen, and that placement is a consequence of
+// how progression works rather than a preference. On the rest screen the verdict is deliberately
+// still a PREVIEW — coach.js splits decide from commit so a miscounted rep can be corrected with
+// the ± buttons, and nothing is written until you leave. Explaining a decision that the next tap
+// can still change would be explaining something that did not happen. Here the verdict is recorded,
+// final, and the numbers behind it are exactly the ones it was made from.
+//
+// This is NOT a second chat. One question, one short answer, no conversation, no history — the
+// same shape as the Stats line's phrase() call, and it degrades the same way: the app's own
+// deterministic explanation is what appears if anything at all goes wrong.
+
+const DECIDED = { progress: 'Moved up', hold: 'Held', deload: 'Deloaded' };
+
+function addDecision(card, exId) {
+  const v = store.lastVerdict(exId);
+  // No recorded decision means no button. Every lift trained before verdicts were kept is in this
+  // state, and an "Explain" button that can only apologise is worse than no button.
+  if (!v) return;
+
+  card.append(line('Last decision', `${DECIDED[v.decision] ?? v.decision} — ${v.reason}`,
+    v.decision === 'progress' ? 'up' : v.decision === 'deload' ? 'warn' : 'flat'));
+
+  const btn = node('button', null, 'Explain this decision');
+  const out = node('p', 'muted data');
+  out.style.textAlign = 'left';
+  btn.addEventListener('click', () => runExplain(exId, btn, out));
+  card.append(btn, out);
+}
+
+async function runExplain(exId, btn, out) {
+  const key = store.getSetting('geminiKey', '');
+  btn.disabled = true;
+
+  // With no key this IS the feature, in full, instantly. The model rewords; it never knows anything
+  // the arithmetic did not already know.
+  if (!key) {
+    out.textContent = explain.plainly(exId);
+    btn.remove();
+    return;
+  }
+
+  btn.textContent = 'Checking the numbers…';
+  const r = await explain.explainDecision(exId, (ev, feedback) => askModel(key, ev, undefined, feedback));
+  btn.remove();
+  out.innerHTML = '';
+
+  if (r.status === 'ok') {
+    for (const o of r.answer.observed) out.append(node('p', null, o));
+    // The model's reading, labelled as one. Observation and interpretation arrive in separate
+    // fields precisely so the screen does not have to guess which is which.
+    if (r.answer.meaning) out.append(node('p', 'muted', `What that suggests: ${r.answer.meaning}`));
+    if (r.answer.suggestion) out.append(node('p', 'muted', r.answer.suggestion));
+    return;
+  }
+
+  // Failed closed. The answer that did not check out is discarded whole — not trimmed, not shown
+  // with the bad clause removed — and the recorded version stands in its place.
+  out.append(node('p', null, explain.plainly(exId)));
+  out.append(node('p', 'muted', r.status === 'unverified'
+    ? 'Part of the written answer used numbers that are not in your record, so it was thrown away. The above is straight from what was logged.'
+    : 'Could not reach the model, so this is straight from what was logged.'));
 }
 
 // ── profile ──────────────────────────────────────────────────────────────────────────────
@@ -1771,6 +1844,24 @@ el.btnPickerBack.addEventListener('click', showToday);
 el.btnBrowse.addEventListener('click', showPicker);
 el.btnProfile.addEventListener('click', showProfile);
 el.btnProgress.addEventListener('click', showProgress);
+/**
+ * Face Wellness owns the FRONT camera, and most Android hardware will not open both at once — so
+ * the gym stream has to be handed back before this asks for one, not merely stopped being used.
+ * Leaving on the way out is the same problem in reverse, which is why close() runs on every exit
+ * path rather than only on the back button.
+ */
+face.init({
+  beforeOpen: () => {
+    running = false;
+    stopCamera(stream);
+    stream = null;
+    lastVideoTs = -1;
+  },
+});
+
+el.btnFace.addEventListener('click', () => { show(el.face); face.open(); });
+el.btnFaceBack.addEventListener('click', () => { face.close(); showToday(); });
+
 el.btnMind.addEventListener('click', () => { show(el.mind); mood.render(); });
 el.btnMindBack.addEventListener('click', showToday);
 el.btnProgressBack.addEventListener('click', showToday);

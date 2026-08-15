@@ -277,8 +277,14 @@ export function dailySeries(days = 28, at = new Date()) {
  */
 export function weightTrend(days = 28, points = store.weights()) {
   const since = Date.now() - days * 864e5;
-  const window = points.filter((w) => new Date(w.at).getTime() >= since);
-  const now = points.at(-1)?.kg ?? null;
+  // Sorted here rather than trusted. appendWeight() keeps the stored array in order, but this
+  // reads "latest" and "earliest" purely by position — so an array that arrived any other way (a
+  // restored backup, a hand-edited import, a future writer that forgets) would not produce a
+  // slightly wrong number, it would report the direction BACKWARDS. Losing 800g reads as gaining
+  // it, and every piece of advice built on top inverts with it.
+  const ordered = [...points].sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  const window = ordered.filter((w) => new Date(w.at).getTime() >= since);
+  const now = ordered.at(-1)?.kg ?? null;
   const change = window.length > 1 ? Math.round((window.at(-1).kg - window[0].kg) * 10) / 10 : null;
   return { now, change, days, points: window };
 }

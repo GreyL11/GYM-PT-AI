@@ -371,6 +371,21 @@
   }
   .err { color: #ff8a80; margin: 0; font: 700 14px/20px var(--mono); }
 
+  /* ── face check-in ───────────────────────────────────────────────────────────────────── */
+  #face-stage { position: relative; width: 100%; aspect-ratio: 3/4; background: #000; overflow: hidden; }
+  #face-cam, #face-overlay { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  /* Mirrored, because a preview that moves the opposite way to your head is unusable. The region
+     maths is told about the flip separately — see regions({mirrored}). */
+  #face-cam, #face-overlay { transform: scaleX(-1); }
+  #face-hud {
+    position: absolute; left: 0; right: 0; bottom: 0; padding: 16px var(--margin) 20px;
+    background: linear-gradient(transparent, #0d0d0fe6 55%); text-align: center;
+  }
+  #face-guide { margin: 0 0 10px; font: 700 18px/24px var(--sans); }
+  #face-bar { height: 4px; background: #ffffff22; border-radius: 999px; overflow: hidden; }
+  #face-progress { height: 100%; width: 0; background: var(--eat); transition: width .12s linear; }
+  #face-state { margin-top: 8px; }
+
   /* devcheck: deliberately unstyled beyond legibility — a text dump, not a product screen */
   #devcheck-out {
     background: var(--sc-lowest); color: var(--on-surface); border: 1px solid var(--outline-variant);
@@ -609,8 +624,11 @@
   .moods button { flex: 1; min-height: 52px; padding: 0; font-size: 22px; }
   .moods button.on { background: var(--neon); border-color: var(--neon); }
 
-  .whenrow { display: flex; gap: 12px; }
-  .whenrow label { flex: 1; color: var(--on-surface-variant); font: 700 11px/16px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+  /* Wraps rather than overflows: a datetime-local is far wider than the time input this row was
+     built for, and two of them side by side push the second one off a phone screen. */
+  .whenrow { display: flex; gap: 12px; flex-wrap: wrap; }
+  .whenrow label { flex: 1 1 12rem; min-width: 0; color: var(--on-surface-variant); font: 700 11px/16px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+  .whenrow input { width: 100%; box-sizing: border-box; }
   input[type=time] {
     width: 100%; margin-top: 6px; min-height: 48px; padding: 0 12px; background: var(--sc-high);
     color: var(--on-surface); border: 1px solid var(--outline-variant); border-radius: 2px;
@@ -821,8 +839,34 @@
       <button id="btn-browse"><svg class="ic"><use href="#i-lifts"/></svg>Lifts</button>
       <button id="btn-eat-tab"><svg class="ic"><use href="#i-eat"/></svg>Eat</button>
       <button id="btn-mind"><svg class="ic"><use href="#i-mind"/></svg>Mind</button>
+      <button id="btn-face"><svg class="ic"><use href="#i-me"/></svg>Face</button>
       <button id="btn-progress"><svg class="ic"><use href="#i-stats"/></svg>Stats</button>
       <button id="btn-profile"><svg class="ic"><use href="#i-me"/></svg>Me</button>
+    </div>
+  </section>
+
+  <!-- face wellness check-in -->
+  <section class="sheet" id="sheet-face" hidden>
+    <header>
+      <button id="btn-face-back" type="button">&larr;</button>
+      <div class="brand" style="flex:1;text-align:center;font-size:24px">Face</div>
+      <div style="width:44px"></div>
+    </header>
+    <div class="body" style="padding:0;gap:0">
+      <div id="face-stage">
+        <video id="face-cam" playsinline muted autoplay></video>
+        <canvas id="face-overlay"></canvas>
+        <div id="face-hud">
+          <p id="face-guide">Starting the camera…</p>
+          <div id="face-bar"><div id="face-progress"></div></div>
+          <p id="face-state" class="muted data"></p>
+        </div>
+      </div>
+      <div style="padding:var(--stack) var(--margin);display:flex;flex-direction:column;gap:12px">
+        <p class="muted">Face the camera in even light and hold still. Nothing is recorded — the
+          picture is measured on this phone and thrown away. Only numbers are kept.</p>
+        <p class="muted data" id="face-privacy"></p>
+      </div>
     </div>
   </section>
 
@@ -1222,9 +1266,22 @@
       <div id="mind-scroll"></div>
       <div class="card" id="mind-setup" hidden>
         <span class="cardlabel" style="color:var(--train)">Set up</span>
-        <p class="muted">The check-in talks to Gemini straight from this phone. Paste a key and it
-          stays on the device in plain text — anyone holding the unlocked phone can read it, so set
-          a spend limit on it. Everything else on this screen works without one.</p>
+        <p class="muted">The check-in talks to Google's Gemini API straight from this phone. There
+          is no server in between and no account — your key and your messages go directly from here
+          to Google.</p>
+        <p class="muted"><b>Sent:</b> what you type, and — while "Answer using my data" is on — a
+          summary of your logged numbers: training, sleep, weight, eating.
+          <b>Never sent:</b> camera frames, pose data, or face images. Those are read on this device
+          and thrown away frame by frame; nothing in this app has ever kept an image.</p>
+        <p class="muted"><b>Which key you paste changes what Google may do with it.</b> Google's
+          terms say that on the free tier, submitted content is used to improve their products and
+          human reviewers may read it; on a billing-enabled key, that it is not used to improve
+          their products. The app behaves identically either way — the difference is the key.
+          <a href="https://ai.google.dev/gemini-api/terms">Gemini API terms</a> ·
+          <a href="https://aistudio.google.com/apikey">your keys</a></p>
+        <p class="muted">The key is stored on this device in plain text — anyone holding the
+          unlocked phone can read it — so set a spend limit on it. Everything else on this screen
+          works without one.</p>
         <input type="password" id="mind-key" placeholder="AIza…" autocomplete="off" spellcheck="false">
         <button id="mind-save-key" class="train" type="button">Save key</button>
         <p id="mind-key-status" class="muted data" hidden></p>
@@ -1238,6 +1295,11 @@
           <button id="mind-test-key" type="button" style="min-height:36px;padding:0 12px;font-size:12px">Test</button>
         </div>
         <p id="mind-key-result" class="muted data">Saved on this device.</p>
+        <label class="switch" style="margin-top:4px">
+          <span>Answer using my data</span>
+          <input type="checkbox" id="mind-share" checked>
+        </label>
+        <p class="muted data" id="mind-share-note"></p>
         <button id="mind-forget-key" type="button" style="min-height:40px;font-size:12px">Forget key</button>
       </div>
       <form id="mind-composer">
@@ -1263,11 +1325,15 @@
 
       <div class="card">
         <span class="cardlabel" style="color:var(--train)">Sleep</span>
-        <p class="muted">Same wake time every day is the part that does the work.</p>
+        <p class="muted">Log a block whenever you wake from one — night, morning, afternoon. It is
+          filed under the day it ended.</p>
         <div class="whenrow">
-          <label>Asleep<input type="time" id="mind-bed"></label>
-          <label>Awake<input type="time" id="mind-wake"></label>
+          <label>Asleep<input type="datetime-local" id="mind-sleep-start"></label>
+          <label>Awake<input type="datetime-local" id="mind-sleep-end"></label>
         </div>
+        <button id="mind-add-sleep" type="button" class="train">Add this sleep</button>
+        <p class="muted data" id="mind-sleep-err" hidden></p>
+        <ul class="plans" id="mind-sleeps"></ul>
         <p class="muted data" id="mind-slept"></p>
       </div>
 
@@ -1293,9 +1359,44 @@
       <div id="mind-trends" style="display:flex;flex-direction:column;gap:var(--stack)"></div>
     </div>
 
+    <!-- skin -->
+    <div class="body" id="mind-panel-skin" hidden>
+      <div class="card">
+        <span class="cardlabel" style="color:var(--train)">Do this</span>
+        <p id="skin-advice" class="coachline"></p>
+        <p id="skin-evidence" class="muted data"></p>
+      </div>
+
+      <div class="card">
+        <div class="line">
+          <span class="cardlabel">Today's skin</span>
+          <span class="cardlabel" id="skin-today-state"></span>
+        </div>
+        <!-- The sentence box is the fast path; the row of numbers underneath always works, with no
+             key and no signal. Neither is a fallback for the other — they write the same entry. -->
+        <textarea id="skin-note" rows="1" placeholder="How's your skin today?" autocomplete="off"></textarea>
+        <button id="skin-read" type="button">Read that</button>
+        <div class="chips wrap" id="skin-score"></div>
+        <label class="fieldlabel" style="margin-top:6px">Anything to note</label>
+        <div class="chips wrap" id="skin-flags" data-multi></div>
+      </div>
+
+      <div class="card">
+        <span class="cardlabel">Routine</span>
+        <div class="chips wrap" id="skin-habits" data-multi></div>
+      </div>
+
+      <div class="card">
+        <span class="cardlabel">Against your log</span>
+        <div id="skin-assoc"></div>
+        <p class="muted data" id="skin-referral"></p>
+      </div>
+    </div>
+
     <div class="foot tabs">
       <button id="mind-tab-talk"><svg class="ic"><use href="#i-talk"/></svg>Talk</button>
       <button id="mind-tab-day"><svg class="ic"><use href="#i-today"/></svg>Today</button>
+      <button id="mind-tab-skin"><svg class="ic"><use href="#i-today"/></svg>Skin</button>
       <button id="mind-tab-trends"><svg class="ic"><use href="#i-stats"/></svg>Trends</button>
     </div>
   </section>

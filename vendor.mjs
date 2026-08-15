@@ -36,6 +36,14 @@ const MODELS = ['lite', 'full'].map((v) => ({
   url: `${MODEL_BASE}/pose_landmarker_${v}/float16/1/pose_landmarker_${v}.task`,
 }));
 
+// Face Wellness. 3.6 MB, and the only new asset the whole feature needs — the WASM runtime and the
+// FaceLandmarker class are already in the vendored bundle, shared with pose. Bundles detection,
+// the 478-point mesh, and the 4x4 facial transformation matrix used for the head-angle gate.
+MODELS.push({
+  file: 'face_landmarker.task',
+  url: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+});
+
 // Google Fonts serves woff2 only to browser user agents; node's default UA gets ttf.
 const FONT_CSS = 'https://fonts.googleapis.com/css2?family=Inter:wght@500;700;800;900&family=JetBrains+Mono:wght@700&display=swap';
 const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';

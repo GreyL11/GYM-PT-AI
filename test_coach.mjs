@@ -230,6 +230,43 @@ check('the stored record carries faultEvents through, not just the flat count', 
   assert.deepEqual(stored.faults, { torso: 2 });
 });
 
+check('committing an exercise writes the decision down, with the numbers it decided from', () => {
+  const coach = newCoach();
+  coach.select('squat', { sets: 1, reps: 5, load: 100, warmup: false });
+  coach.endSet(setDone(3, { depth: 4 }));
+
+  assert.deepEqual(store.verdicts(), [], 'previewing on the rest screen commits nothing');
+
+  coach.finishExercise();
+  const v = store.verdicts().at(-1);
+  assert.equal(v.exId, 'squat');
+  assert.equal(v.decision, 'hold');
+  assert.equal(v.reason, 'reps missed');
+  assert.equal(v.from, 100);
+  assert.equal(v.to, 100);
+  assert.equal(v.unit, 'kg');
+  assert.ok(v.at, 'and when');
+  // The numbers, not the sentence — "reps missed" is a conclusion, 3 of 5 is the reason for it.
+  assert.equal(v.evidence.repsHit, false);
+  assert.equal(v.evidence.totalReps, 3);
+  assert.equal(v.evidence.totalFaults, 4);
+  assert.equal(v.evidence.cleanLimit, 0.34, 'the threshold it was compared against travels too');
+  assert.equal(store.lastVerdict('squat').reason, 'reps missed');
+  assert.equal(store.lastVerdict('bench'), null, 'a lift never decided on has no verdict to find');
+});
+
+check('a progression is recorded as what it was, not as a load that simply changed', () => {
+  const coach = newCoach();
+  coach.select('bench', { sets: 1, reps: 5, load: 60, warmup: false });
+  coach.endSet(setDone(5));
+  coach.finishExercise();
+  const v = store.lastVerdict('bench');
+  assert.equal(v.decision, 'progress');
+  assert.equal(v.to, 62.5);
+  assert.equal(v.evidence.repsHit, true);
+  assert.equal(v.evidence.faultsPerRep, 0);
+});
+
 check('a legacy-shaped set with no faultEvents field logs cleanly, not a crash', () => {
   const coach = newCoach();
   coach.select('bench', { sets: 1, reps: 5, load: 60, warmup: false });

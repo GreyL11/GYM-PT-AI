@@ -8,7 +8,31 @@
 // The key is stored on the device (store.settings.geminiKey) in plain text, because the call goes
 // straight from the phone with no server in between. Use a key with a spend limit on it.
 
-const MODEL = 'gemini-2.5-flash';
+/**
+ * Which model, and why this one.
+ *
+ * Was `gemini-2.5-flash` until Google stopped serving it to new keys — the API's own words were
+ * "no longer available to new users", which meant the check-in worked for whoever set it up first
+ * and was silently dead for everyone who pasted a key after. Google's model list still calls 2.5
+ * stable, because it is: for existing projects. A model that works only for people who arrived
+ * early is not a model this app can ship.
+ *
+ * `3.5-flash-lite` rather than a bigger sibling, for two reasons that both come back to the same
+ * thing — the person pays for this out of their own key:
+ *
+ *   Price is identical to the model it replaces ($0.30/$2.50 per Mtok), so nobody's bill moves.
+ *   Its default thinking level is already "minimal", which is what the old `thinkingBudget: 0` was
+ *   buying. Thinking costs a silent pause before the first word streams, and that pause is the
+ *   whole feel of a check-in.
+ *
+ * The thinking parameter is deliberately NOT set. 3.x renamed it (`thinking_level`, not
+ * `thinkingBudget`) and sending the old spelling to a new model is how you ship a second outage
+ * while fixing the first. The default is already what we would have asked for.
+ *
+ * Overridable by env so eval_coach.mjs can compare models without editing source. `process` does
+ * not exist in the browser, so this is inert in the app.
+ */
+const MODEL = globalThis.process?.env?.GEMINI_MODEL ?? 'gemini-3.5-flash-lite';
 const BASE = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}`;
 const ENDPOINT = `${BASE}:streamGenerateContent?alt=sse`;
 
@@ -134,7 +158,7 @@ Rules:
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: system }] },
         contents: [{ role: 'user', parts: [{ text: JSON.stringify(facts) }] }],
-        generationConfig: { maxOutputTokens: 120, thinkingConfig: { thinkingBudget: 0 } },
+        generationConfig: { maxOutputTokens: 120 },
       }),
     });
     if (!res.ok) return null;
@@ -166,7 +190,7 @@ export async function testKey(apiKey, signal) {
       headers: headers(apiKey),
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: 'hi' }] }],
-        generationConfig: { maxOutputTokens: 1, thinkingConfig: { thinkingBudget: 0 } },
+        generationConfig: { maxOutputTokens: 1 },
       }),
     });
     if (res.ok) return { ok: true, message: 'Key works.' };
@@ -177,20 +201,172 @@ export async function testKey(apiKey, signal) {
   }
 }
 
+/**
+ * Turn "forehead's rough and I broke out along my jaw again" into a structured skin entry.
+ *
+ * This is the one job in the app a model does better than arithmetic could, and it is the job that
+ * decides whether the feature survives: a daily score plus six checkboxes is a form, and nobody
+ * fills in a form every night for a month. A sentence they would have thought anyway, they will.
+ *
+ * The model reads language and nothing else. It does not score the skin against anything, decide
+ * what caused it, or produce advice — skin.js does all of that from the numbers, offline and
+ * tested. And what comes back is shown for confirmation before it is saved, because a mis-parsed
+ * entry silently entering the log would poison every comparison built on top of it.
+ *
+ * Returns null on any failure. The manual score and chips always work, with no key and no signal;
+ * this only ever saves taps.
+ */
+export async function readSkinNote(apiKey, text, signal) {
+  const system = `Convert a person's sentence about their skin today into structured data.
+
+- score: how their skin seems, 1 (bad day) to 5 (good day). Infer it from tone if they do not say a number.
+- flags: only the ones they actually mention or clearly imply. Empty array is correct if they mention none.
+- Do not diagnose, name any condition, or add anything they did not say.`;
+
+  try {
+    const res = await fetch(`${BASE}:generateContent`, {
+      method: 'POST',
+      signal,
+      headers: headers(apiKey),
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: system }] },
+        contents: [{ role: 'user', parts: [{ text }] }],
+        generationConfig: {
+          // Structured output rather than parsing prose: the shape is guaranteed by the API, so
+          // there is no regex here to break on a model that phrases things differently tomorrow.
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: 'OBJECT',
+            properties: {
+              score: { type: 'INTEGER' },
+              flags: {
+                type: 'ARRAY',
+                items: { type: 'STRING', enum: ['breakout', 'oily', 'dry', 'red', 'sore', 'puffy'] },
+              },
+            },
+            required: ['score', 'flags'],
+          },
+        },
+      }),
+    });
+    if (!res.ok) return null;
+    const body = await res.json();
+    const raw = (body.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('');
+    const parsed = JSON.parse(raw);
+    const score = Math.round(Number(parsed.score));
+    // Trust the schema for shape, never for range — a 7 out of 5 would skew every average built
+    // on it, and clamping is cheaper than discovering that months later.
+    if (!Number.isFinite(score) || score < 1 || score > 5) return null;
+    return { score, flags: Array.isArray(parsed.flags) ? [...new Set(parsed.flags)] : [] };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Explain one already-made progression decision, from the evidence that decided it.
+ *
+ * NOT STREAMED, and that is the whole point rather than an oversight. Everything the check-in
+ * streams is visible the instant it arrives, so anything checked afterwards is checked after the
+ * person has already read it. This returns one complete object, which the caller validates before
+ * anything reaches the screen — the only arrangement in this app where "unsupported numbers are
+ * blocked" is a true sentence rather than a hopeful one.
+ *
+ * Structured output does the other half. The three fields are not decoration: they are how a claim
+ * gets classified without anything having to read English. What lands in `observed` is checked
+ * against the evidence, what lands in `suggestion` is exempt, and the model — not a word list on
+ * this side — decides which is which by putting the sentence in a box. `readSkinNote()` already
+ * proved the API honours a response schema; this is the same mechanism doing a more useful job.
+ *
+ * @param evidence  the packet from evidence.js. The model sees ONLY this — no chat history, no
+ *                  digest, no profile. A narrow question deserves a narrow context.
+ * @param feedback  on a retry, what was wrong with the first attempt. Never new evidence.
+ */
+export async function explain(apiKey, evidence, signal, feedback = null) {
+  const system = `You explain one decision a training app already made, to the person it was made about.
+
+The decision and the numbers behind it are given to you as JSON. They are the only facts you have.
+
+- observed: what the app recorded. Every number here must appear in the JSON. Quote figures as digits, not words.
+- meaning: what you think it indicates. This is your reading, not a measurement — say it as such. Any number in it must still come from the JSON.
+- suggestion: one thing they could do next, or leave it empty. A number here is a proposal, not a report.
+
+Rules:
+- Never invent a figure, a rep count, a date or a session that is not in the JSON. If something is not there, say it is not recorded.
+- If the JSON has "formEvidence" instead of "form", the camera has not watched this lift enough to know anything about how it moves. Say so in observed, in plain words. Leaving it out is the worst thing you can do here: silence about their form reads as approval of it, and you would be reassuring them about something nobody has looked at.
+- Do not list the numbers back as a table. Explain what happened in sentences, using the figures that matter.
+- The decision was made by fixed arithmetic against fixed thresholds. Explain it. Do not re-decide it, and do not say whether it was the right call for them.
+- Two things happening together is not one causing the other, and this data cannot show that it is.
+- No diagnosis, no injury claims, no comment on whether a weight is safe or healthy for them.
+- Speak plainly, to "you", the way a training partner would. Short.`;
+
+  const user = feedback
+    ? `${JSON.stringify(evidence)}\n\nYour previous answer was rejected. ${feedback}`
+    : JSON.stringify(evidence);
+
+  try {
+    const res = await fetch(`${BASE}:generateContent`, {
+      method: 'POST',
+      signal,
+      headers: headers(apiKey),
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: system }] },
+        contents: [{ role: 'user', parts: [{ text: user }] }],
+        generationConfig: {
+          maxOutputTokens: 400,
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: 'OBJECT',
+            properties: {
+              observed: { type: 'ARRAY', items: { type: 'STRING' } },
+              meaning: { type: 'STRING' },
+              suggestion: { type: 'STRING' },
+            },
+            required: ['observed', 'meaning'],
+          },
+        },
+      }),
+    });
+    if (!res.ok) return null;
+    const body = await res.json();
+    const raw = (body.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('');
+    const parsed = JSON.parse(raw);
+    // Trust the schema for shape, never for content — same discipline as readSkinNote()'s range
+    // clamp. An `observed` that is not an array of strings would sail straight past the validator
+    // with nothing to extract, which is the one way an unchecked claim could reach the screen.
+    if (!Array.isArray(parsed.observed) || parsed.observed.some((s) => typeof s !== 'string')) return null;
+    return {
+      observed: parsed.observed,
+      meaning: typeof parsed.meaning === 'string' ? parsed.meaning : '',
+      suggestion: typeof parsed.suggestion === 'string' ? parsed.suggestion : '',
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Yields text as it arrives. `messages` is [{role, content}], oldest first. */
-export async function* talk(apiKey, messages, signal) {
+/**
+ * @param facts  optional {rules, data} brief from digest.js — the user's own logged numbers.
+ *
+ * It rides in the SYSTEM instruction rather than being pasted into a user message, which is how
+ * the Stats screen used to smuggle numbers in. Two reasons: the transcript stays a record of what
+ * the person actually said, and the model treats system text as standing context rather than as
+ * something they just asked about.
+ */
+export async function* talk(apiKey, messages, signal, facts = null) {
+  const system = facts
+    ? `${SYSTEM}\n\n---\n\n${facts.rules}\n\n${JSON.stringify(facts.data)}`
+    : SYSTEM;
   const res = await fetch(ENDPOINT, {
     method: 'POST',
     signal,
     headers: headers(apiKey),
     body: JSON.stringify({
-      systemInstruction: { parts: [{ text: SYSTEM }] },
+      systemInstruction: { parts: [{ text: system }] },
       contents: toContents(messages),
       generationConfig: {
         maxOutputTokens: 1024,
-        // Thinking buys a silent pause before the first word streams — wrong trade for a chat.
-        // 2.5 Flash is the tier that lets you turn it off outright.
-        thinkingConfig: { thinkingBudget: 0 },
       },
     }),
   });

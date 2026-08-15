@@ -211,7 +211,16 @@ export function createCoach({ speak }) {
       return { reps: last.reps, verdict: this.preview() };
     },
 
-    /** What progression WOULD do. Pure: no storage writes, no speech. */
+    /**
+     * What progression WOULD do. Pure: no storage writes, no speech.
+     *
+     * Every branch now carries the numbers it branched on, in `evidence`. Purely additive — the
+     * `moved`/`deload`/`reps`/`from`/`to`/`reason` shape every existing caller reads is untouched —
+     * and it is what makes a decision explainable after the fact rather than merely announced:
+     * "form broke down" is a conclusion, `faultsPerRep: 0.4` against `cleanLimit: 0.34` is the
+     * reason for it. Nothing here is a new decision input; these are the same values the branches
+     * above were already computed from, kept instead of discarded.
+     */
     preview() {
       if (!current || !exerciseSets.length) return null;
       const { exId, load, increment, reps, bodyweight } = current;
@@ -221,29 +230,53 @@ export function createCoach({ speak }) {
         (a, s) => a + Object.values(s.faults).reduce((x, y) => x + y, 0), 0,
       );
       const rate = totalReps ? totalFaults / totalReps : 0;
+      const evidence = {
+        sets: exerciseSets.length,
+        repsHit: allReps,
+        totalReps,
+        totalFaults,
+        faultsPerRep: Math.round(rate * 100) / 100,
+        cleanLimit: CLEAN_FAULTS_PER_REP,
+        stalledSessions: insights.stalledSessions(exId),
+      };
 
       if (allReps && rate < CLEAN_FAULTS_PER_REP) {
         // Nothing to add weight to on a push-up, so the rep target goes up instead.
         return bodyweight
-          ? { moved: true, reps: true, from: reps, to: reps + 1, reason: 'all reps clean' }
-          : { moved: true, from: load, to: loadable(exId, load + increment), reason: 'all reps clean' };
+          ? { moved: true, reps: true, from: reps, to: reps + 1, reason: 'all reps clean', evidence }
+          : { moved: true, from: load, to: loadable(exId, load + increment), reason: 'all reps clean', evidence };
       }
       if (!bodyweight && insights.shouldDeload(exId)) {
         return {
           moved: true, deload: true, from: load,
-          to: loadable(exId, insights.deloadTo(load)), reason: 'stalled three sessions',
+          to: loadable(exId, insights.deloadTo(load)), reason: 'stalled three sessions', evidence,
         };
       }
       return {
         moved: false, reps: bodyweight, from: bodyweight ? reps : load, to: bodyweight ? reps : load,
-        reason: !allReps ? 'reps missed' : 'form broke down',
+        reason: !allReps ? 'reps missed' : 'form broke down', evidence,
       };
     },
 
-    /** Apply the verdict. Called when the lifter leaves the rest screen, after any correction. */
+    /**
+     * Apply the verdict. Called when the lifter leaves the rest screen, after any correction.
+     *
+     * Written down here rather than in preview(), for the same reason the load is: preview() runs
+     * on every ± tap on the rest screen, and only this is the moment the lifter actually committed
+     * to. One decision per exercise, recorded where the decision is applied.
+     */
     finishExercise() {
       const v = this.preview();
       if (!v) return null;
+      store.appendVerdict({
+        exId: current.exId,
+        decision: v.deload ? 'deload' : v.moved ? 'progress' : 'hold',
+        unit: v.reps ? 'reps' : 'kg',
+        from: v.from,
+        to: v.to,
+        reason: v.reason,
+        evidence: v.evidence,
+      });
       const unit = v.reps ? 'reps' : 'kilos';
       if (v.moved) {
         if (v.reps) store.setReps(current.exId, v.to);

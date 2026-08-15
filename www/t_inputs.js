@@ -15,7 +15,7 @@
 //   Training  Acts mostly through body composition. Both ends hurt: near-nothing, and very high
 //             endurance volume on a deep deficit.
 
-import { sleepHours, trainedDays } from './mood_insights.js';
+import { sleepSummary, trainedDays } from './mood_insights.js';
 
 /** Four weeks: long enough to survive one bad week, short enough to still be about now. */
 export const WINDOW = 28;
@@ -29,17 +29,33 @@ export const TRAIN_LOW = 8;
 
 const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 
+/**
+ * The MAIN sleep each night, averaged — plus what the naps added, reported separately.
+ *
+ * The split is not tidiness. The evidence this whole file rests on (Leproult & Van Cauter) is about
+ * consolidated nightly sleep restriction, so a four-hour night plus a three-hour nap is not the
+ * seven hours that study is about, and summing them would produce a "good" verdict from a number
+ * the research does not cover. The verdict comes from the main block; `totalAvg` is shown beside it
+ * as the different, also-true thing it is.
+ */
 export function sleep(days, n, shiftKey) {
-  const hours = [];
+  const main = [];
+  const total = [];
+  let napDays = 0;
   for (let i = -n + 1; i <= 0; i++) {
-    const d = days[shiftKey(i)];
-    const h = sleepHours(d?.bed, d?.wake);
-    if (h !== null) hours.push(h);
+    const s = sleepSummary(days[shiftKey(i)]);
+    if (s.main === null) continue;
+    main.push(s.main);
+    total.push(s.total);
+    if (s.naps > 0) napDays += 1;
   }
-  if (hours.length < MIN_NIGHTS) return { verdict: 'unknown', nights: hours.length };
-  const avg = Math.round(mean(hours) * 10) / 10;
+  if (main.length < MIN_NIGHTS) return { verdict: 'unknown', nights: main.length };
+  const avg = Math.round(mean(main) * 10) / 10;
+  const totalAvg = Math.round(mean(total) * 10) / 10;
   const verdict = avg < SLEEP_LOW ? 'low' : avg < SLEEP_TARGET ? 'under' : 'good';
-  return { verdict, nights: hours.length, avg };
+  // `totalAvg` is only worth saying when it differs from the main sleep — otherwise it is the same
+  // number twice, and a second identical figure reads as if it means something new.
+  return { verdict, nights: main.length, avg, ...(totalAvg > avg ? { totalAvg, napDays } : {}) };
 }
 
 /**
@@ -75,19 +91,66 @@ const toMins = (hhmm) => {
 };
 
 /**
- * The wake time you actually keep, as the median of the ones logged.
+ * How far apart your wake times may sit before "your usual wake time" stops being a real thing.
  *
- * Median rather than mean so one 04:00 airport run doesn't drag the whole target earlier.
+ * Three hours. Inside that, a median describes a habit and a bedtime computed from it is a thing
+ * you can actually do. Outside it, the median is an average of a shift pattern — a number no
+ * morning ever looked like — and prescribing a clock time from it is the app inventing a routine
+ * on someone's behalf.
  */
-export function usualWake(days, n, shiftKey) {
+export const REGULAR_SPREAD_MINS = 180;
+
+/**
+ * When you actually wake, and whether "actually" means anything.
+ *
+ * Clock times are circular, which the obvious implementation gets wrong: waking at 23:00 and at
+ * 01:00 is a two-hour spread, not twenty-two. So the spread here is the SMALLEST ARC containing
+ * every wake time — found by taking the largest gap between neighbours around the circle and
+ * subtracting it from the day — and the median is taken inside that arc rather than on the raw
+ * numbers. Without this, one late night flips a perfectly regular sleeper to "irregular".
+ *
+ * Reads the end of each day's main sleep, falling back to the legacy `wake` field for days logged
+ * before episodes existed.
+ */
+export function wakePattern(days, n, shiftKey) {
   const mins = [];
   for (let i = -n + 1; i <= 0; i++) {
-    const m = toMins(days[shiftKey(i)]?.wake);
-    if (m !== null) mins.push(m);
+    const day = days[shiftKey(i)];
+    const [main] = sleepSummary(day).blocks;
+    if (main?.end) {
+      const d = new Date(main.end);
+      mins.push(d.getHours() * 60 + d.getMinutes());
+    } else {
+      const m = toMins(day?.wake);
+      if (m !== null) mins.push(m);
+    }
   }
   if (!mins.length) return null;
-  mins.sort((a, b) => a - b);
-  return clock(mins[Math.floor(mins.length / 2)]);
+
+  const sorted = [...mins].sort((a, b) => a - b);
+  let gap = sorted[0] + 1440 - sorted.at(-1);   // the wrap-around gap
+  let origin = sorted[0];
+  for (let i = 1; i < sorted.length; i += 1) {
+    if (sorted[i] - sorted[i - 1] > gap) {
+      gap = sorted[i] - sorted[i - 1];
+      origin = sorted[i];
+    }
+  }
+  const spread = 1440 - gap;
+  const rotated = sorted.map((m) => (m - origin + 1440) % 1440).sort((a, b) => a - b);
+  return {
+    median: clock((origin + rotated[Math.floor(rotated.length / 2)]) % 1440),
+    spreadMins: spread,
+    spreadHours: Math.round((spread / 60) * 10) / 10,
+    regular: spread <= REGULAR_SPREAD_MINS,
+    nights: mins.length,
+  };
+}
+
+/** The wake time you actually keep, or null when there is no such thing. */
+export function usualWake(days, n, shiftKey) {
+  const p = wakePattern(days, n, shiftKey);
+  return p && p.regular ? p.median : null;
 }
 
 /**
@@ -126,7 +189,18 @@ export function advice(r, wake = null) {
         plan: `Lights off by ${bed}`,
       };
     }
-    // No wake time logged, so no bedtime can be computed — name a shift instead of a clock time.
+
+    // A wake time exists but it moves around. Prescribing a bedtime off the median of a rotating
+    // schedule would be naming an hour no morning of theirs ever looked like, so the target moves
+    // from a clock time to a length — which is the part they can act on whenever their day starts.
+    if (r.wake && !r.wake.regular) {
+      return {
+        text: `Main sleep is averaging ${r.sleep.avg}h, and your wake time moves across about ${r.wake.spreadHours} hours, so there is no usual hour to set a bedtime against. Aim for ${SLEEP_TARGET}h in the main block, whenever it starts.`,
+        plan: `${SLEEP_TARGET}h in the main sleep`,
+      };
+    }
+
+    // No wake time logged at all, so no bedtime can be computed — name a shift instead of an hour.
     return {
       text: `Averaging ${r.sleep.avg}h. ${worst ? 'Sleep is the input with the clearest effect.' : `${SLEEP_TARGET}h is where the evidence sits.`} Log a wake time and this can name the hour.`,
       plan: 'Lights off 45 minutes earlier',
@@ -152,6 +226,7 @@ export function read({ days, weights, log, rounds }, dayKey, shiftKey, n = WINDO
     sleep: sleep(d, n, shiftKey),
     weight: weight(weights, n, dayKey, shiftKey),
     training: training(log, rounds, n, dayKey, shiftKey),
+    wake: wakePattern(d, n, shiftKey),
   };
-  return { ...r, advice: advice(r, usualWake(d, n, shiftKey)) };
+  return { ...r, advice: advice(r, r.wake?.regular ? r.wake.median : null) };
 }

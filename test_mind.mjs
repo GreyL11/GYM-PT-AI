@@ -1,7 +1,9 @@
 // The arithmetic behind every number the Mind sheet shows, plus the one screener rule that is not
 // a data point. If this is wrong the app lies confidently, which is worse than showing nothing.
 import assert from 'node:assert/strict';
-import { sleepHours, trainedDays, rows, split, sparkline, MIN_SAMPLE } from './www/mood_insights.js';
+import {
+  sleepHours, sleepBlocks, sleepSummary, trainedDays, rows, split, sparkline, MIN_SAMPLE,
+} from './www/mood_insights.js';
 import { score, band, risk } from './www/checks.js';
 import { drainSSE, trimToUserStart, toContents } from './www/chat.js';
 import { dayKey, shiftKey } from './www/store.js';
@@ -12,6 +14,49 @@ assert.equal(sleepHours('01:30', '09:00'), 7.5);    // same side of midnight
 assert.equal(sleepHours('22:45', '06:15'), 7.5);
 assert.equal(sleepHours('', '07:00'), null);
 assert.equal(sleepHours('nonsense', '07:00'), null);
+
+// ── sleep as blocks: naps, odd hours, and the 24h case the clock version got wrong ────────
+{
+  const at = (day, h, m = 0) => new Date(2026, 7, day, h, m).toISOString();
+
+  // A day you did not log is not a day you did not sleep.
+  assert.deepEqual(sleepSummary({}), { main: null, total: null, naps: 0, blocks: [] });
+  assert.deepEqual(sleepSummary(undefined).main, null);
+
+  // Old days keep reading exactly as they always did.
+  const legacy = sleepSummary({ bed: '23:00', wake: '07:00' });
+  assert.equal(legacy.main, 8);
+  assert.equal(legacy.total, 8);
+  assert.equal(legacy.naps, 0);
+  assert.equal(legacy.blocks[0].legacy, true);
+
+  // A night plus an afternoon nap. Reported apart, because they are not the same thing: the
+  // verdict rests on evidence about consolidated sleep, and 4 + 3 is not that seven hours.
+  const split2 = sleepSummary({ sleeps: [
+    { start: at(11, 2), end: at(11, 6) },      // 4h night
+    { start: at(11, 14), end: at(11, 17) },    // 3h nap
+  ] });
+  assert.equal(split2.main, 4, 'the longest block is the main sleep');
+  assert.equal(split2.total, 7);
+  assert.equal(split2.naps, 1);
+  assert.equal(split2.blocks.length, 2);
+  assert.equal(split2.blocks[0].hours, 4, 'longest first');
+
+  // Sleeping through the day is just a block like any other.
+  assert.equal(sleepSummary({ sleeps: [{ start: at(11, 10), end: at(11, 16, 30) }] }).main, 6.5);
+
+  // The case the clock-time version reported as zero.
+  assert.equal(sleepHours('22:00', '22:00'), 0, 'the old shape genuinely cannot see this');
+  assert.equal(sleepSummary({ sleeps: [{ start: at(11, 22), end: at(12, 22) }] }).main, 24);
+
+  // Episodes win outright — the legacy pair is the same sleep written the old way, not an extra one.
+  const both = sleepSummary({ bed: '23:00', wake: '07:00', sleeps: [{ start: at(11, 1), end: at(11, 6) }] });
+  assert.equal(both.total, 5, 'the old fields are not added on top');
+
+  // Junk does not become a number.
+  assert.deepEqual(sleepBlocks({ sleeps: [{ start: 'nope', end: 'also nope' }] }), []);
+  assert.deepEqual(sleepBlocks({ sleeps: [{ start: at(11, 6), end: at(11, 2) }] }), [], 'backwards is not negative sleep');
+}
 
 // ── training days come from the lifting log, not an import ───────────────────────────────
 {

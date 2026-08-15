@@ -19,7 +19,36 @@ const blank = {
   checks: [],
   // The check-in conversation. Separate from `log` for the same reason `rounds` is.
   chat: [],
+  // What progression decided, and the numbers it decided from. See appendVerdict below.
+  verdicts: [],
 };
+
+/**
+ * What progression decided at the end of an exercise, and the numbers it decided from.
+ *
+ * The outcome of a verdict has always survived — as a changed load in `loads`. The REASONING never
+ * did: it lived in a closure in coach.js and was gone the moment you left the rest screen. So
+ * "why did it hold me at 60 kg on Tuesday" had no answer, because nothing had written Tuesday down.
+ *
+ * What is stored is the deterministic result and its inputs, never prose. Anything explaining a
+ * verdict later — a template, or the model — reads these numbers; it does not get to reconstruct
+ * the decision, and a verdict that was never recorded stays unavailable rather than inferred.
+ *
+ * Additive and backward-compatible: every existing install simply has none, and read()'s spread
+ * over `blank` gives them an empty array rather than undefined. Old sets keep no verdict forever —
+ * that is honest, and backfilling one from a load change would be a decision nobody made.
+ */
+export function appendVerdict(entry) {
+  const { verdicts } = read();
+  write({ verdicts: [...verdicts, { at: new Date().toISOString(), ...entry }].slice(-200) });
+  return entry;
+}
+
+export const verdicts = () => read().verdicts;
+
+/** The most recent decision for a lift, or null when nothing was ever recorded for it. */
+export const lastVerdict = (exId) =>
+  [...read().verdicts].reverse().find((v) => v.exId === exId) ?? null;
 
 export function appendRound(entry) {
   const { rounds } = read();
@@ -152,7 +181,7 @@ export function importAll(text) {
   const data = parsed?.data ?? parsed;
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('That is not a backup.');
   for (const [key, shape] of [['log', Array], ['meals', Array], ['weights', Array], ['loads', Object],
-    ['chat', Array], ['checks', Array], ['days', Object]]) {
+    ['chat', Array], ['checks', Array], ['days', Object], ['verdicts', Array]]) {
     if (key in data && (shape === Array ? !Array.isArray(data[key]) : typeof data[key] !== 'object')) {
       throw new Error(`Backup is damaged: "${key}" is the wrong shape.`);
     }
@@ -171,7 +200,12 @@ export const dayKey = (d = new Date()) =>
 export const shiftKey = (n, from = new Date()) =>
   dayKey(new Date(from.getFullYear(), from.getMonth(), from.getDate() + n));
 
-const emptyDay = { mood: null, bed: '', wake: '', plans: [] };
+// `skin` rides on the day row for the same reason mood and sleep do: it is an answer to "how did
+// today go", read as one row by every screen that uses it. Shape: {score 1-5, flags[], habits[]}.
+// `sleeps` is the current shape: one entry per block of sleep, with real timestamps, filed under
+// the day it ENDED. `bed`/`wake` are the old one-pair-per-day shape and are kept because every day
+// logged before this existed is stored that way — mood_insights.sleepBlocks() reads either.
+const emptyDay = { mood: null, bed: '', wake: '', sleeps: [], plans: [], skin: null };
 
 export const days = () => read().days;
 
@@ -182,6 +216,31 @@ export function patchDay(patch, key = dayKey()) {
   // ~14 months. Long enough to see a seasonal pattern, short enough to stay small.
   const keys = Object.keys(next).sort().slice(-420);
   write({ days: Object.fromEntries(keys.map((k) => [k, next[k]])) });
+}
+
+/**
+ * Record one block of sleep, filed under the day it ended.
+ *
+ * Filed by END rather than start because that is the question the rest of the app asks: "how did I
+ * sleep for today" is about the sleep you just got up from, and a block running 23:00 Monday to
+ * 07:00 Tuesday is Tuesday's night however you say it out loud. It also removes the ambiguity the
+ * old bed/wake pair had, where a sleep landed on whichever day you happened to open the app.
+ *
+ * Kept sorted by start, and capped, so a day cannot grow without limit if something goes wrong.
+ * Returns the day key it was filed under, which is not always today.
+ */
+export function addSleep(start, end) {
+  const key = dayKey(new Date(end));
+  const next = [...day(key).sleeps, { start, end }]
+    .sort((a, b) => String(a.start).localeCompare(String(b.start)))
+    .slice(-8);
+  patchDay({ sleeps: next }, key);
+  return key;
+}
+
+/** Remove a mis-logged block. Matched on its start, which is unique enough within one day. */
+export function removeSleep(key, start) {
+  patchDay({ sleeps: day(key).sleeps.filter((s) => s.start !== start) }, key);
 }
 
 export const chat = () => read().chat;

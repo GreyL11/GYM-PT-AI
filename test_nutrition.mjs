@@ -291,6 +291,21 @@ check('a backup round-trips, and a bad one is refused rather than half-applied',
   assert.equal(store.meals().length, 1, 'still there after every failed restore');
 });
 
+check('the weight trend reads by date, not by array position', () => {
+  // Found while seeding the chat's brief: an out-of-order array made the same data read as
+  // -0.8 kg here and +0.8 kg in coachLine(). Position is not chronology, and getting this
+  // backwards inverts every piece of advice built on the direction of travel.
+  const day = (n) => new Date(Date.now() - n * 864e5).toISOString();
+  const scrambled = [
+    { at: day(0), kg: 80 },    // today, deliberately first
+    { at: day(20), kg: 79.2 }, // three weeks ago, deliberately last
+    { at: day(10), kg: 79.6 },
+  ];
+  const t = n.weightTrend(28, scrambled);
+  assert.equal(t.now, 80, 'latest is the most recent date, not the last element');
+  assert.equal(t.change, 0.8, 'and the direction follows from that');
+});
+
 check('water is counted from anything with a volume, but not from alcohol', () => {
   const day = [
     { at: 'a', foodId: 'water', qty: 4 },   // a litre

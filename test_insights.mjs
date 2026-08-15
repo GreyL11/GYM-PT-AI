@@ -48,6 +48,70 @@ check('sets collapse into one entry per training day', () => {
   assert.equal(s[1].load, 65);
 });
 
+check('the strength trend reads by date, not by array position', () => {
+  // The same defect fixed in nutrition.weightTrend(), in the function whose changePct the chat's
+  // brief hands to the model. A restored backup or any writer that does not append in order would
+  // report a 33% GAIN as a 25% loss, and the stall counter would count at the wrong load.
+  seed([
+    set('squat', daysAgo(1), 80, 5),   // today, deliberately first
+    set('squat', daysAgo(28), 60, 5),  // a month ago, deliberately last
+  ]);
+  const st = insights.strength('squat');
+  assert.ok(st.changePct > 30, `latest is the most recent date, not the last element (got ${st.changePct}%)`);
+  assert.ok(st.days > 0, `and the span cannot run backwards (got ${st.days})`);
+  assert.equal(insights.stalledSessions('squat'), 1, 'the stall counts back from the newest load');
+});
+
+check('the chronology holds however the log arrives', () => {
+  const asc = [set('squat', daysAgo(28), 60, 5), set('squat', daysAgo(14), 70, 5), set('squat', daysAgo(1), 80, 5)];
+  seed(asc);
+  const forward = insights.strength('squat');
+
+  seed([...asc].reverse());
+  assert.deepEqual(insights.strength('squat'), forward, 'descending input reads the same as ascending');
+
+  seed([asc[1], asc[2], asc[0]]);
+  assert.deepEqual(insights.strength('squat'), forward, 'and so does shuffled');
+  assert.ok(forward.days > 0 && forward.changePct > 0);
+
+  // Sorting must not reorder the caller's log as a side effect of reading it.
+  const live = [asc[2], asc[0], asc[1]];
+  seed(live);
+  insights.sessions('squat');
+  assert.equal(JSON.parse(mem.get('gym-trainer/v1')).log[0].at, asc[2].at, 'the stored log is untouched');
+});
+
+check('a set with no usable timestamp is dropped from the trend, not placed at one end of it', () => {
+  seed([
+    set('squat', daysAgo(28), 60, 5),
+    set('squat', 'not a date', 200, 5),   // a corrupt import, or a hand-edited backup
+    set('squat', undefined, 999, 5),
+    set('squat', daysAgo(1), 80, 5),
+  ]);
+  const s = insights.sessions('squat');
+  assert.equal(s.length, 2, 'two placeable training days');
+  const st = insights.strength('squat');
+  assert.ok(Number.isFinite(st.days) && st.days > 0, `elapsed days must be a real number, got ${st.days}`);
+  assert.ok(st.changePct > 30, 'and the 200 kg ghost never becomes the best lift');
+});
+
+check('two sets in the same millisecond keep their written order', () => {
+  const at = daysAgo(3);
+  seed([set('squat', at, 60, 5), set('squat', at, 70, 3)]);
+  const s = insights.sessions('squat');
+  assert.equal(s.length, 1, 'same day is one session');
+  assert.equal(s[0].sets, 2);
+  assert.equal(s[0].load, 70, 'the heaviest of the day is the session load');
+});
+
+check('too little history returns nothing rather than a trend of one point', () => {
+  seed([set('squat', daysAgo(2), 80, 5)]);
+  assert.equal(insights.strength('squat'), null, 'one session cannot describe a direction');
+  seed([]);
+  assert.equal(insights.strength('squat'), null);
+  assert.deepEqual(insights.sessions('squat'), []);
+});
+
 check('strength trend reads the direction of travel', () => {
   seed([set('squat', daysAgo(28), 60, 5), set('squat', daysAgo(1), 80, 5)]);
   const st = insights.strength('squat');

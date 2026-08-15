@@ -3,8 +3,8 @@
 // verdict on a weight direction the data cannot justify.
 import assert from 'node:assert/strict';
 import {
-  read, sleep, weight, training, advice, usualWake,
-  WINDOW, SLEEP_TARGET, SLEEP_LOW, MIN_NIGHTS, TRAIN_LOW,
+  read, sleep, weight, training, advice, usualWake, wakePattern,
+  WINDOW, SLEEP_TARGET, SLEEP_LOW, MIN_NIGHTS, TRAIN_LOW, REGULAR_SPREAD_MINS,
 } from './www/t_inputs.js';
 import { dayKey, shiftKey } from './www/store.js';
 
@@ -158,6 +158,86 @@ const nights = (n, bed, wake) => {
   assert.equal(full.training.verdict, 'low');
   assert.match(full.advice.text, /training days/);
   assert.equal(full.advice.plan, 'Train');
+}
+
+// ── irregular sleep: the card must stop naming an hour it cannot know ─────────────────────
+{
+  /** `n` days of a main sleep of `hours`, waking at a time drawn from `wakeHours` in rotation. */
+  const shifts = (n, hours, wakeHours) => {
+    const d = {};
+    for (let i = 0; i < n; i++) {
+      const key = shiftKey(-i);
+      const [y, m, day] = key.split('-').map(Number);
+      const end = new Date(y, m - 1, day, wakeHours[i % wakeHours.length], 0);
+      const start = new Date(end - hours * 3600000);
+      d[key] = { sleeps: [{ start: start.toISOString(), end: end.toISOString() }] };
+    }
+    return d;
+  };
+
+  // A steady sleeper: the median is a real habit, and a bedtime computed from it is actionable.
+  // 5.5h, so the sleep branch is reached — a merely-short night is outranked by no training at all.
+  const steady = shifts(14, 5.5, [7, 7, 8, 7]);
+  const sp = wakePattern(steady, WINDOW, shiftKey);
+  assert.equal(sp.regular, true);
+  assert.equal(sp.median, '07:00');
+  assert.ok(sp.spreadMins <= REGULAR_SPREAD_MINS);
+  assert.equal(usualWake(steady, WINDOW, shiftKey), '07:00');
+  assert.match(read({ days: steady, weights: [], log: [], rounds: [] }, dayKey, shiftKey).advice.text,
+    /Lights off by/, 'a real routine gets a real bedtime');
+
+  // Clock times are circular: waking at 23:00 and 01:00 is two hours apart, not twenty-two.
+  // Without that, one late night alone would flip a regular sleeper to irregular.
+  const midnight = wakePattern(shifts(14, 7, [23, 0, 1, 0]), WINDOW, shiftKey);
+  assert.equal(midnight.regular, true, `spread across midnight was ${midnight.spreadHours}h`);
+  assert.equal(midnight.spreadHours, 2);
+
+  // A rotating shift. The median of these is an hour no morning ever looked like, so the card
+  // must not prescribe a bedtime from it.
+  const rotating = shifts(14, 5.5, [6, 13, 21, 9]);
+  const rp = wakePattern(rotating, WINDOW, shiftKey);
+  assert.equal(rp.regular, false);
+  assert.ok(rp.spreadHours > 3, `expected a wide spread, got ${rp.spreadHours}h`);
+  assert.equal(usualWake(rotating, WINDOW, shiftKey), null, 'there is no usual wake time to report');
+
+  const r = read({ days: rotating, weights: [], log: [], rounds: [] }, dayKey, shiftKey);
+  assert.equal(r.sleep.verdict, 'low', '5.5h is short however it is scheduled');
+  assert.doesNotMatch(r.advice.text, /Lights off by \d/, 'no invented bedtime');
+  assert.match(r.advice.text, /wake time moves/);
+  assert.match(r.advice.plan, new RegExp(`${SLEEP_TARGET}h`), 'the target becomes a length, not an hour');
+}
+
+// ── naps are counted, but never into the verdict ──────────────────────────────────────────
+{
+  const withNaps = {};
+  for (let i = 0; i < 14; i++) {
+    const key = shiftKey(-i);
+    const [y, m, day] = key.split('-').map(Number);
+    const night = { start: new Date(y, m - 1, day, 1).toISOString(), end: new Date(y, m - 1, day, 6).toISOString() };
+    const nap = { start: new Date(y, m - 1, day, 14).toISOString(), end: new Date(y, m - 1, day, 17).toISOString() };
+    withNaps[key] = { sleeps: [night, nap] };
+  }
+
+  const s = sleep(withNaps, WINDOW, shiftKey);
+  // 5h night + 3h nap. Summed it would be 8h and "good" — a verdict drawn from evidence about
+  // consolidated sleep, applied to something that is not consolidated sleep.
+  assert.equal(s.avg, 5, 'the verdict reads the main block');
+  assert.equal(s.verdict, 'low');
+  assert.equal(s.totalAvg, 8, 'and the total is still reported, as the different thing it is');
+  assert.equal(s.napDays, 14);
+
+  // With no naps there is no second figure — the same number twice reads as if it means more.
+  const plain = sleep((() => {
+    const d = {};
+    for (let i = 0; i < 14; i++) {
+      const key = shiftKey(-i);
+      const [y, m, day] = key.split('-').map(Number);
+      d[key] = { sleeps: [{ start: new Date(y, m - 1, day, 1).toISOString(), end: new Date(y, m - 1, day, 8).toISOString() }] };
+    }
+    return d;
+  })(), WINDOW, shiftKey);
+  assert.equal(plain.avg, 7);
+  assert.equal(plain.totalAvg, undefined);
 }
 
 console.log('t_inputs ok');

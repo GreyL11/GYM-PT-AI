@@ -10,12 +10,14 @@
 import * as store from './store.js';
 import * as mi from './mood_insights.js';
 import { CHECKS, OPTIONS, score, band, risk, DUE_DAYS, daysSince } from './checks.js';
-import { talk, testKey, Blocked, BLOCKED_REPLY } from './chat.js';
+import { talk, testKey, readSkinNote, Blocked, BLOCKED_REPLY } from './chat.js';
+import { digest, RULES } from './digest.js';
+import * as skin from './skin.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-const PANELS = ['talk', 'day', 'trends'];
+const PANELS = ['talk', 'day', 'skin', 'trends'];
 const FACES = ['\u{1F61E}', '\u{1F615}', '\u{1F610}', '\u{1F642}', '\u{1F604}'];
 const WINDOW = 30;
 const TOMORROW = () => store.shiftKey(1);
@@ -31,6 +33,7 @@ export function render() {
   }
   if (panel === 'talk') renderTalk();
   if (panel === 'day') renderDay();
+  if (panel === 'skin') renderSkin();
   if (panel === 'trends') renderTrends();
 }
 
@@ -75,6 +78,7 @@ function renderTalk() {
   $('mind-composer').hidden = !key;
   $('mind-setup').hidden = !!key;
   $('mind-key-check').hidden = !key;
+  if (key) renderShare();
 
   if (painted) return;
   painted = true;
@@ -95,11 +99,22 @@ async function send(text) {
   store.appendChat('user', text);
   bubble('user', text);
 
+  /**
+   * Your own numbers, so "why am I not gaining?" can be answered about you rather than in general.
+   *
+   * Rebuilt for every message rather than cached: it is local arithmetic over data already in
+   * memory, and a stale brief would have the model answering about last Tuesday. Off means the
+   * conversation goes up with nothing but what you typed, which is what it did before.
+   */
+  const facts = store.getSetting('shareData', true)
+    ? { rules: RULES, data: digest() }
+    : null;
+
   $('mind-send').disabled = true;
   const reply = bubble('assistant');
   let full = '';
   try {
-    for await (const chunk of talk(key, store.recentChat())) {
+    for await (const chunk of talk(key, store.recentChat(), undefined, facts)) {
       full += chunk;
       reply.textContent = full;
       $('mind-scroll').scrollTop = $('mind-scroll').scrollHeight;
@@ -173,11 +188,111 @@ async function checkKey() {
 
 $('mind-test-key').addEventListener('click', checkKey);
 
+/**
+ * Whether your logged numbers go up with the conversation.
+ *
+ * Everything else in this app stays on the phone, so this is the one place personal data leaves it
+ * — and it should be a visible switch rather than a paragraph nobody reads. The note underneath
+ * says what actually gets sent, counted from the brief itself so it cannot drift out of date as
+ * fields are added.
+ */
+function renderShare() {
+  const on = store.getSetting('shareData', true);
+  $('mind-share').checked = on;
+  const fields = Object.keys(digest()).length;
+  $('mind-share-note').textContent = on
+    ? `Sends a summary — training, sleep, weight, eating (${fields} groups) — with each message. Never camera frames or face images. No names, no chat history beyond this conversation.`
+    : 'Off. Replies use only what you type here.';
+}
+
+$('mind-share').addEventListener('change', () => {
+  store.setSetting('shareData', $('mind-share').checked);
+  renderShare();
+});
+
 $('mind-forget-key').addEventListener('click', () => {
   store.setSetting('geminiKey', '');
   $('mind-key-result').textContent = 'Saved on this device.';
   $('mind-key-result').style.color = '';
   render();
+});
+
+// ── skin ─────────────────────────────────────────────────────────────────────────────────
+// Display wiring only. Every judgement — what to do, what correlates, when to refuse to speak —
+// is skin.js, which is pure and tested. Nothing here decides anything.
+
+function saveSkin(patch) {
+  const cur = store.day().skin ?? { score: null, flags: [], habits: [] };
+  store.patchDay({ skin: { ...cur, ...patch } });
+  renderSkin();
+}
+
+function renderSkin() {
+  const today = store.day().skin ?? { score: null, flags: [], habits: [] };
+
+  const a = skin.advice();
+  $('skin-advice').textContent = a.text;
+  $('skin-evidence').textContent = a.evidence;
+  $('skin-referral').textContent = skin.SEE_SOMEONE;
+  $('skin-today-state').textContent = today.score ? `${today.score} / 5` : 'not logged';
+
+  chips($('skin-score'), skin.SCALE.map((n) => ({ id: String(n), label: String(n) })),
+    today.score ? [String(today.score)] : [], (sel) => saveSkin({ score: Number(sel[0]) }), true);
+  chips($('skin-flags'), skin.FLAGS, today.flags ?? [], (sel) => saveSkin({ flags: sel }));
+  chips($('skin-habits'), skin.HABITS, today.habits ?? [], (sel) => saveSkin({ habits: sel }));
+
+  const rows = skin.associations();
+  $('skin-assoc').innerHTML = rows.length
+    ? rows.map((r) => `<div class="line"><span class="k">${esc(r.label)}</span>`
+        + `<span class="v">${r.diff > 0 ? '+' : ''}${r.diff}</span></div>`
+        + `<p class="muted data" style="margin:2px 0 10px">`
+        + `${r.lowScore} on the ${r.lowDays} lower days · ${r.highScore} on the ${r.highDays} higher</p>`).join('')
+    : `<p class="muted">Not enough logged yet to compare anything honestly.</p>`;
+}
+
+/** Single- or multi-select chip row. Single-select is used for the 1–5 score. */
+function chips(container, items, selected, onChange, single = false) {
+  container.innerHTML = '';
+  for (const it of items) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.dataset.value = it.id;
+    b.textContent = it.label;
+    b.setAttribute('aria-pressed', String(selected.includes(it.id)));
+    if (it.why) b.title = it.why;
+    b.addEventListener('click', () => {
+      const next = single
+        ? [it.id]
+        : selected.includes(it.id) ? selected.filter((x) => x !== it.id) : [...selected, it.id];
+      onChange(next);
+    });
+    container.append(b);
+  }
+}
+
+/**
+ * Read a sentence into an entry.
+ *
+ * Shown, never silently saved: a mis-parsed score would sit in the log forever skewing every
+ * comparison built on it, and the person is right there to catch it. Falls back to the chips on
+ * any failure — no key, no signal, or a reply that did not make sense.
+ */
+$('skin-read').addEventListener('click', async () => {
+  const text = $('skin-note').value.trim();
+  if (!text) return;
+  const key = store.getSetting('geminiKey', '');
+  const btn = $('skin-read');
+  if (!key) { btn.textContent = 'Needs a key — or just tap a number'; return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Reading…';
+  const parsed = await readSkinNote(key, text);
+  btn.disabled = false;
+  btn.textContent = 'Read that';
+  if (!parsed) { btn.textContent = 'Could not read that — tap a number instead'; return; }
+
+  saveSkin({ score: parsed.score, flags: parsed.flags });
+  $('skin-note').value = '';
 });
 
 // ── day ──────────────────────────────────────────────────────────────────────────────────
@@ -226,10 +341,7 @@ function renderDay() {
     }),
   );
 
-  $('mind-bed').value = d.bed;
-  $('mind-wake').value = d.wake;
-  const hours = mi.sleepHours(d.bed, d.wake);
-  $('mind-slept').textContent = hours === null ? '' : `${hours} hours`;
+  renderSleeps();
 
   renderPlans($('mind-plans-today'), store.dayKey(), false);
   renderPlans($('mind-plans-tomorrow'), TOMORROW(), true);
@@ -242,12 +354,90 @@ function renderDay() {
       : `Last one was ${since} days ago.`;
 }
 
-for (const part of ['bed', 'wake']) {
-  $(`mind-${part}`).addEventListener('change', () => {
-    store.patchDay({ [part]: $(`mind-${part}`).value });
-    renderDay();
-  });
+// ── sleep ────────────────────────────────────────────────────────────────────────────────
+//
+// A list of blocks rather than one Asleep/Awake pair, because a pair can only hold one sleep a day
+// and cannot say WHICH day it belongs to — logged at 3pm after a night shift, the old fields landed
+// on whichever day the app happened to be opened. A block carries real timestamps and is filed
+// under the day it ended, so a nap and a night can both exist and neither has to be rounded into a
+// story about "last night".
+//
+// `datetime-local` rather than a picker library: it is native, it already understands dates and
+// times together, and it costs nothing.
+
+/** `Date` → the string a datetime-local input wants, in LOCAL time, not UTC. */
+const localInput = (d) => {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+};
+
+const clockOf = (iso) => {
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+
+function renderSleeps() {
+  const d = store.day();
+  const s = mi.sleepSummary(d);
+  const list = $('mind-sleeps');
+  list.innerHTML = '';
+
+  for (const b of s.blocks) {
+    const li = document.createElement('li');
+    const when = b.legacy
+      ? `${d.bed}–${d.wake}`
+      : `${clockOf(b.start)}–${clockOf(b.end)}`;
+    li.innerHTML = `<span>${esc(when)} · ${b.hours}h</span>`;
+    if (!b.legacy) {
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.textContent = '×';
+      del.addEventListener('click', () => {
+        store.removeSleep(store.dayKey(), b.start);
+        renderDay();
+      });
+      li.append(del);
+    }
+    list.append(li);
+  }
+
+  // Main and total, kept apart on screen for the same reason they are kept apart in the arithmetic:
+  // they answer different questions, and only the first one has the sleep evidence behind it.
+  $('mind-slept').textContent = s.main === null ? ''
+    : s.naps
+      ? `Main sleep ${s.main}h · ${s.total}h in total across ${s.blocks.length} blocks`
+      : `${s.main} hours`;
+
+  // Prefill a plausible block: ended now, started eight hours ago. Most of the time that is two
+  // corrections, not four fields typed from nothing.
+  const now = new Date();
+  if (!$('mind-sleep-end').value) $('mind-sleep-end').value = localInput(now);
+  if (!$('mind-sleep-start').value) $('mind-sleep-start').value = localInput(new Date(now - 8 * 3600000));
 }
+
+$('mind-add-sleep').addEventListener('click', () => {
+  const startRaw = $('mind-sleep-start').value;
+  const endRaw = $('mind-sleep-end').value;
+  const err = $('mind-sleep-err');
+  const fail = (msg) => { err.hidden = false; err.textContent = msg; };
+  err.hidden = true;
+
+  const start = new Date(startRaw);
+  const end = new Date(endRaw);
+  if (!startRaw || !endRaw || Number.isNaN(+start) || Number.isNaN(+end)) return fail('Both ends are needed.');
+  // Refused rather than silently swapped: if these are the wrong way round, one of them is a
+  // mistyped date, and guessing which would file the sleep under a day it did not happen on.
+  if (+end <= +start) return fail('The waking time has to be after the falling-asleep time.');
+  const hours = (end - start) / 3600000;
+  if (hours > 24) return fail('Longer than a day — check the dates.');
+
+  const key = store.addSleep(start.toISOString(), end.toISOString());
+  $('mind-sleep-start').value = '';
+  $('mind-sleep-end').value = '';
+  // Filed under the day it ended, which is not always today — say so rather than let it look lost.
+  if (key !== store.dayKey()) fail(`Logged under ${key}, the day you woke up.`);
+  renderDay();
+});
 
 $('mind-add-plan').addEventListener('submit', (e) => {
   e.preventDefault();

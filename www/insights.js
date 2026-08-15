@@ -47,10 +47,33 @@ const countFaults = (f) => Object.values(f ?? {}).reduce((a, b) => a + b, 0);
  */
 export const e1rm = (load, reps) => (load > 0 && reps > 0 ? load * (1 + (reps - 1) / 30) : 0);
 
-/** One entry per training day for a lift, oldest first. */
+/**
+ * One entry per training day for a lift, oldest first.
+ *
+ * Sorted here rather than trusted, for the same reason nutrition.weightTrend() is: everything built
+ * on this reads "first" and "last" by array position, and position is only chronology while every
+ * writer appends in order. appendLog() does — but importAll() restores whatever ordering the backup
+ * file happens to have and validates shape only. An out-of-order log does not make strength() a
+ * little wrong, it makes changePct point the WRONG WAY — verified: a 33% gain read back as −25% —
+ * and makes stalledSessions() count a stall at whichever load happens to sit last in the array.
+ *
+ * Three ordering cases, decided rather than left to chance:
+ *   Unparseable `at`   dropped. A set that cannot be placed in time cannot join a trend, and
+ *                      keeping it built an "Invalid Date" session whose date subtraction was NaN.
+ *                      Not data loss: store.read().log still holds the record untouched.
+ *   Equal `at`         left in insertion order. Array#sort is stable, and two sets written in the
+ *                      same millisecond carry no truth about which came first.
+ *   Already in order   unchanged, which is every log this app writes for itself.
+ *
+ * The array is copied before sorting, never sorted in place — reordering the caller's log as a
+ * side effect of reading it would be its own bug.
+ */
 export function sessions(exId) {
   const byDay = new Map();
-  for (const e of store.history(exId)) {
+  const ordered = [...store.history(exId)]
+    .filter((e) => Number.isFinite(new Date(e.at).getTime()))
+    .sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  for (const e of ordered) {
     const key = dayKey(e.at);
     const s = byDay.get(key) ?? { date: key, at: e.at, load: e.load, sets: 0, reps: 0, faults: 0, best: 0 };
     s.sets += 1;
@@ -219,6 +242,16 @@ function usableEvents(record) {
 }
 
 const hasUsableEvents = (record) => wasTracked(record) && usableEvents(record).length > 0;
+
+/**
+ * How many of the last `lookback` sets of a lift carry fault-event data at all.
+ *
+ * This is the denominator every pattern confidence is a fraction of, and it is the only thing that
+ * separates "this fault does not happen" from "nothing here was ever watched for it". Exported so
+ * evidence.js can draw that line without re-deriving `wasTracked` and letting the two drift.
+ */
+export const trackedSets = (exId, lookback = 6) =>
+  store.history(exId).filter(wasTracked).slice(-lookback).length;
 
 /** Within ONE set: where did it first go wrong, and was the second half worse than the first? */
 export function setBreakdown(record) {

@@ -77,13 +77,29 @@ the setup card and it is stored on the device in plain text, so set a spend limi
 else on this screen works without a key. Swapping provider is `www/chat.js` and nothing else — no
 other file knows what is behind the chat.
 
+There is no server in between, so **which key you paste decides what Google may do with what you
+send**. Their [API terms](https://ai.google.dev/gemini-api/terms) say free-tier content is used to
+improve Google's products and may be read by human reviewers; content sent with a billing-enabled
+key is not. The app is identical either way. What goes up is what you type plus the summary in
+`www/digest.js` — never a camera frame, a pose landmark or a face image, none of which this app has
+ever stored in the first place.
+
 The chat is the *interface*. What has evidence behind it is the rest:
 
 **Today** — mood 1–5, sleep, and the day's plans. Plan two or three specific things the night
 before, tick them off the next day. That loop (behavioural activation) is the highest-evidence
 thing an app like this can actually deliver, which is why the placeholder says "walk to the shop at
-7" rather than "get outside more". Fixed wake time is the part of the sleep card that does the
-work.
+7" rather than "get outside more".
+
+Sleep is logged as **blocks**, not a bedtime and a wake time: log one whenever you wake from one,
+and it is filed under the day it ended. That is the only shape that survives shift work, daytime
+sleep and naps — and it means a night that crosses midnight belongs to one day rather than
+whichever day you happened to open the app. Where you nap, the app reports your **main sleep** and
+your total separately and judges only the first: the evidence behind the sleep advice is about one
+consolidated block, so adding a 3h nap to a 4h night and calling it seven hours would be a reading
+that research does not support. If your wake time moves around, the card stops prescribing a
+bedtime — an hour computed from the median of a rotating schedule is an hour no morning of yours
+ever looked like — and gives you a target length instead.
 
 **Trends** — 30-day mood line, and the difference in average mood on days you trained, slept 7h+,
 or did what you planned. **Days you trained is read straight off your lifting log** — that is the

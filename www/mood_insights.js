@@ -8,7 +8,14 @@
 /** Below this many days on either side of a comparison, say nothing. */
 export const MIN_SAMPLE = 4;
 
-/** 'HH:MM' → 'HH:MM', crossing midnight. Null if either end is missing. */
+/**
+ * 'HH:MM' → 'HH:MM', crossing midnight. Null if either end is missing.
+ *
+ * The legacy shape: two clock times on a day row, no dates. It handles daytime sleep correctly
+ * (10:00 → 16:00 is six hours) but it cannot represent more than one sleep in a day, and the
+ * modulo means a full 24 hours reads as zero. Kept because every day logged before episodes
+ * shipped is stored this way, and those days are still real.
+ */
 export function sleepHours(bed, wake) {
   const mins = (t) => {
     const m = /^(\d{1,2}):(\d{2})$/.exec(t ?? '');
@@ -18,6 +25,54 @@ export function sleepHours(bed, wake) {
   const w = mins(wake);
   if (b === null || w === null) return null;
   return Math.round(((w - b + 1440) % 1440) / 6) / 10;
+}
+
+const round1 = (n) => Math.round(n * 10) / 10;
+
+/**
+ * Every sleep on a day row, longest first, as hours.
+ *
+ * A day holds `sleeps: [{start, end}]` — real timestamps, so a block that runs from Tuesday 22:00
+ * to Wednesday 22:00 is twenty-four hours rather than the zero the clock-time version reports. A
+ * block is filed under the day it ENDED, because you log a sleep after waking from it and "how did
+ * I sleep for today" is a question about the sleep you just got up from.
+ *
+ * Falls back to the legacy `bed`/`wake` pair when there are no episodes, so old days keep reading
+ * exactly as they always did. A day with episodes ignores the legacy fields entirely rather than
+ * adding them in — that pair is the same sleep, written the old way.
+ */
+export function sleepBlocks(day) {
+  const eps = (day?.sleeps ?? [])
+    .map((s) => ({ start: s.start, end: s.end, hours: round1((new Date(s.end) - new Date(s.start)) / 3600000) }))
+    .filter((s) => Number.isFinite(s.hours) && s.hours > 0)
+    .sort((a, b) => b.hours - a.hours);
+  if (eps.length) return eps;
+
+  const legacy = sleepHours(day?.bed, day?.wake);
+  return legacy === null || legacy <= 0 ? [] : [{ start: null, end: null, hours: legacy, legacy: true }];
+}
+
+/**
+ * The longest block — the main sleep — and everything else.
+ *
+ * Split rather than summed because the two are not the same thing and the app reads them
+ * differently. The sleep evidence the Testosterone card rests on (Leproult & Van Cauter, JAMA 2011)
+ * is about CONSOLIDATED nightly sleep; adding a three-hour nap to a four-hour night and calling the
+ * result seven hours would be reporting a number that study says nothing about. So the verdict is
+ * taken from `main`, and `total` is reported beside it as what it is — time spent asleep.
+ *
+ * Returns nulls rather than zeros for a day with nothing logged. A day you did not record is not a
+ * day you did not sleep.
+ */
+export function sleepSummary(day) {
+  const blocks = sleepBlocks(day);
+  if (!blocks.length) return { main: null, total: null, naps: 0, blocks: [] };
+  return {
+    main: blocks[0].hours,
+    total: round1(blocks.reduce((a, b) => a + b.hours, 0)),
+    naps: blocks.length - 1,
+    blocks,
+  };
 }
 
 const planRate = (plans) =>
@@ -43,7 +98,9 @@ export function rows(days, trained, n, dayKey, shiftKey) {
     return {
       key,
       mood: d.mood ?? null,
-      hours: sleepHours(d.bed, d.wake),
+      // The main sleep, not the day's total — the same block the verdict is taken from, so the
+      // Trends comparison and the Testosterone card cannot disagree about what "slept 7h" meant.
+      hours: sleepSummary(d).main,
       plans: planRate(d.plans),
       trained: trained.has(key),
     };
