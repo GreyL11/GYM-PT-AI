@@ -256,6 +256,37 @@ check('a fault must persist before it is called out', () => {
   assert.ok(run('squat', hold(3, bad)).faults.includes('torso'), 'three frames is a fault');
 });
 
+check('a joint the rules mention but reps do not need never stops the set', () => {
+  // Reported from a real session: "step back, I need to see all of you" while already against the
+  // wall. A bench press counts reps off shoulder/elbow/wrist — the hip is in `needs` only for the
+  // elbow-flare rule — so an invisible hip used to refuse every rep of the set.
+  const hipHidden = (lm) => {
+    const out = lm.map((p) => ({ ...p }));
+    for (const side of ['left', 'right']) out[IDX[side].hip] = { ...out[IDX[side].hip], visibility: 0.1 };
+    return out;
+  };
+  const rep = [
+    ...hold(3, () => body({ elbowAngle: 170 })),
+    ...hold(6, () => body({ elbowAngle: 75 })),
+    ...hold(6, () => body({ elbowAngle: 170 })),
+  ].map(hipHidden);
+
+  const r = run('bench', rep);
+  assert.equal(r.st.reps, 1, 'reps come off the arm, so they must still count');
+  assert.equal(r.last.visible, true);
+
+  // But a joint reps genuinely depend on still stops it — and says which one.
+  const wristHidden = rep.map((lm) => {
+    const out = lm.map((p) => ({ ...p }));
+    for (const side of ['left', 'right']) out[IDX[side].wrist] = { ...out[IDX[side].wrist], visibility: 0.1 };
+    return out;
+  });
+  const blind = run('bench', wristHidden);
+  assert.equal(blind.last.visible, false);
+  assert.ok(blind.last.missing.includes('wrist'), `should name the wrist, got ${blind.last.missing}`);
+  assert.equal(blind.st.reps, 0);
+});
+
 check('half a skeleton coaches nothing', () => {
   const r = run('squat', hold(6, () => body({ kneeAngle: 120, lean: 62, visibility: 0.2 })));
   assert.equal(r.faults.length, 0);

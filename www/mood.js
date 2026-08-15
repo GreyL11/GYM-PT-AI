@@ -10,7 +10,7 @@
 import * as store from './store.js';
 import * as mi from './mood_insights.js';
 import { CHECKS, OPTIONS, score, band, risk, DUE_DAYS, daysSince } from './checks.js';
-import { talk, Blocked, BLOCKED_REPLY } from './chat.js';
+import { talk, testKey, Blocked, BLOCKED_REPLY } from './chat.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -74,6 +74,7 @@ function renderTalk() {
   const key = store.getSetting('geminiKey', '');
   $('mind-composer').hidden = !key;
   $('mind-setup').hidden = !!key;
+  $('mind-key-check').hidden = !key;
 
   if (painted) return;
   painted = true;
@@ -143,11 +144,39 @@ $('mind-input').addEventListener('keydown', (e) => {
   }
 });
 
-$('mind-save-key').addEventListener('click', () => {
+/**
+ * Save the key, then immediately prove whether it works.
+ *
+ * Saving used to do nothing visible beyond swapping one panel for another, so a key that was
+ * invalid, restricted or region-blocked looked exactly like a key that was fine — right up until
+ * you typed a message and got an error, or read a Stats card that silently stayed on its template
+ * sentence. Testing on save is the moment the answer is cheapest to give.
+ */
+$('mind-save-key').addEventListener('click', async () => {
   const v = $('mind-key').value.trim();
   if (!v) return;
   store.setSetting('geminiKey', v);
   $('mind-key').value = '';
+  render();
+  await checkKey();
+});
+
+async function checkKey() {
+  const key = store.getSetting('geminiKey', '');
+  const out = $('mind-key-result');
+  if (!key) return;
+  out.textContent = 'Checking…';
+  const { ok, message } = await testKey(key);
+  out.textContent = message;
+  out.style.color = ok ? 'var(--eat)' : '#ff8a80';
+}
+
+$('mind-test-key').addEventListener('click', checkKey);
+
+$('mind-forget-key').addEventListener('click', () => {
+  store.setSetting('geminiKey', '');
+  $('mind-key-result').textContent = 'Saved on this device.';
+  $('mind-key-result').style.color = '';
   render();
 });
 

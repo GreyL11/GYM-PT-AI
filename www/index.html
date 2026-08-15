@@ -1227,6 +1227,18 @@
           a spend limit on it. Everything else on this screen works without one.</p>
         <input type="password" id="mind-key" placeholder="AIza…" autocomplete="off" spellcheck="false">
         <button id="mind-save-key" class="train" type="button">Save key</button>
+        <p id="mind-key-status" class="muted data" hidden></p>
+      </div>
+
+      <!-- Once a key is saved there is nowhere else that says whether it actually works: the Stats
+           card fails silently by design, and the chat only errors when you send something. -->
+      <div class="card" id="mind-key-check" hidden>
+        <div class="line">
+          <span class="cardlabel" style="color:var(--train)">API key</span>
+          <button id="mind-test-key" type="button" style="min-height:36px;padding:0 12px;font-size:12px">Test</button>
+        </div>
+        <p id="mind-key-result" class="muted data">Saved on this device.</p>
+        <button id="mind-forget-key" type="button" style="min-height:40px;font-size:12px">Forget key</button>
       </div>
       <form id="mind-composer">
         <textarea id="mind-input" rows="1" placeholder="How was today?" autocomplete="off"></textarea>

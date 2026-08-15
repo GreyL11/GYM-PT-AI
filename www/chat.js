@@ -147,6 +147,36 @@ Rules:
   }
 }
 
+/**
+ * Does this key actually work? One cheap call, and the provider's own words back.
+ *
+ * Everything else that uses the key fails quietly on purpose — the Stats line keeps its correct
+ * template sentence rather than showing an error, and the chat only complains once you have typed
+ * something and sent it. Which is fine until the key is wrong, at which point the app's entire
+ * response to "I pasted my key" is that nothing whatsoever happens.
+ *
+ * So this returns the real message: "API key not valid", a region refusal, a quota exhaustion.
+ * Guessing at which of those it was is exactly what made it maddening.
+ */
+export async function testKey(apiKey, signal) {
+  try {
+    const res = await fetch(`${BASE}:generateContent`, {
+      method: 'POST',
+      signal,
+      headers: headers(apiKey),
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: 'hi' }] }],
+        generationConfig: { maxOutputTokens: 1, thinkingConfig: { thinkingBudget: 0 } },
+      }),
+    });
+    if (res.ok) return { ok: true, message: 'Key works.' };
+    return { ok: false, message: await failure(res) };
+  } catch (err) {
+    // A network-level failure here is almost always no signal, or the phone blocking the request.
+    return { ok: false, message: `Could not reach Gemini: ${err.message}` };
+  }
+}
+
 /** Yields text as it arrives. `messages` is [{role, content}], oldest first. */
 export async function* talk(apiKey, messages, signal) {
   const res = await fetch(ENDPOINT, {

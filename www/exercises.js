@@ -816,6 +816,37 @@ const HOLD_FRAMES = 3;   // a fault must survive this many frames before it is s
 /** A joint the tracker is less sure than this about does not get to trigger a correction. */
 const MIN_JOINT_VIS = 0.5;
 
+/**
+ * Which landmarks a measurement actually reads, discovered by running it against a Proxy that
+ * records every property touched.
+ *
+ * The same trick the fault loop uses. Asking the function rather than maintaining a hand-written
+ * list per lift means the two can never drift apart — a rule that changes which joints it uses
+ * updates its own requirements by definition.
+ */
+function jointsUsedBy(fn, ctx, P, W) {
+  const touched = new Set();
+  const watch = (obj) => new Proxy(obj, {
+    get: (t, k) => { if (typeof k === 'string') touched.add(k); return t[k]; },
+  });
+  const wP = watch(P);
+  const wW = watch(W);
+  const joints = {
+    knee: () => angle(wW.hip, wW.knee, wW.ankle),
+    elbow: () => angle(wW.shoulder, wW.elbow, wW.wrist),
+    hip: () => angle(wW.shoulder, wW.hip, wW.knee),
+    shoulder: () => angle(wW.hip, wW.shoulder, wW.elbow),
+  };
+  try {
+    fn({ ...ctx, P: wP, W: wW, jointAngle: (j) => joints[j]() });
+  } catch {
+    // A measurement that throws on a half-built skeleton tells us nothing about what it needs;
+    // fall back to the lift's declared list rather than guessing it needs nothing.
+    return null;
+  }
+  return [...touched];
+}
+
 // The tracked side is locked for the set; these decide when it has genuinely been lost.
 const SIDE_LOST_VIS = 0.35;
 const SIDE_LOST_FRAMES = 15;
@@ -864,13 +895,6 @@ export function step(exId, frame, st, T) {
   const P = pick(lm, IDX[side]);
   const W = pick(w, IDX[side]);
 
-  // Bail out rather than coach off half a skeleton.
-  const seen = ex.needs.every((k) => (P[k]?.visibility ?? 1) >= 0.5);
-  if (!seen) {
-    st.faultFrames = {};
-    return { visible: false, angle: st.ema ?? 0, phase: st.phase, reps: st.reps, repCompleted: false, faults: [] };
-  }
-
   const JOINTS = {
     knee: () => angle(W.hip, W.knee, W.ankle),
     elbow: () => angle(W.shoulder, W.elbow, W.wrist),
@@ -879,6 +903,29 @@ export function step(exId, frame, st, T) {
   };
 
   const ctx = { lm, w, P, W, T, st, side, view, jointAngle: (j) => JOINTS[j]() };
+
+  /**
+   * Only what REP COUNTING needs, not every joint the lift's rules mention.
+   *
+   * This used to demand `ex.needs` in full — so a bench press refused to count a single rep
+   * whenever the camera could not see your hip, even though reps come from shoulder/elbow/wrist
+   * and the hip is only there for the elbow-flare rule. In a real gym that reads as "step back, I
+   * need to see all of you" while you are already against the wall, and it is why setting the
+   * phone up ate so much of a session.
+   *
+   * Nothing is lost by narrowing it: every fault below already records the landmarks its own test
+   * touched and skips itself when they are not clear enough (see `confident`). So a half-visible
+   * skeleton now counts reps and runs the rules it genuinely can, instead of refusing everything.
+   */
+  const primaryJoints = jointsUsedBy(ex.primary, ctx, P, W) ?? ex.needs;
+  const missing = primaryJoints.filter((k) => (P[k]?.visibility ?? 1) < MIN_JOINT_VIS);
+  if (missing.length) {
+    st.faultFrames = {};
+    return {
+      visible: false, missing, angle: st.ema ?? 0, phase: st.phase,
+      reps: st.reps, repCompleted: false, faults: [],
+    };
+  }
 
   const raw = ex.primary(ctx);
   st.ema = st.ema === null ? raw : st.ema + EMA_ALPHA * (raw - st.ema);

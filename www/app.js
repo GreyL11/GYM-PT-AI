@@ -1502,7 +1502,9 @@ function frame() {
 
       el.status.textContent = out.visible
         ? `${Math.round(out.angle)}° · ${out.phase} · ${Math.round(fps)}fps`
-        : 'Step back into frame';
+        // Mid-set the phone has already been placed, so this is the one line telling you why it
+        // went quiet. Naming the part is the difference between a fixable problem and a dead set.
+        : framingFix(out.missing)[0];
       drawSkeleton(el.overlay.getContext('2d'), lm, {
         width: el.overlay.width, height: el.overlay.height, bad: live && out.faults.length > 0,
       });
@@ -1516,10 +1518,46 @@ function frame() {
 
 // ── framing: do not start counting while the lifter walks to the bar ─────────────────────
 
+/** Body parts as a person would say them, not as landmark keys. */
+const PART = {
+  ankle: 'feet', heel: 'heels', toe: 'toes', knee: 'knees', hip: 'hips',
+  shoulder: 'shoulders', elbow: 'elbows', wrist: 'hands', index: 'hands',
+};
+
+/** Which way to move the phone to bring a part back into shot. Lower body means tilt down or
+ *  step back; upper body usually means the phone is too low or too close. */
+const FIX = {
+  ankle: 'Tilt the phone down or step back',
+  heel: 'Tilt the phone down or step back',
+  toe: 'Tilt the phone down or step back',
+  knee: 'Tilt the phone down a little',
+  hip: 'Move the phone back a step',
+  shoulder: 'Tilt the phone up a little',
+  elbow: 'Move the phone back a step',
+  wrist: 'Move the phone back a step',
+};
+
+/**
+ * Say what is actually missing.
+ *
+ * "Step back — I need to see all of you" is the single most infuriating thing this app did: it is
+ * the same sentence whether your feet are cut off, the phone is too low, or you are standing
+ * behind a rack upright — and it kept saying it while the lifter was already against the wall
+ * with nowhere left to step. Naming the part turns a guessing game into one adjustment.
+ */
+function framingFix(missing) {
+  if (!missing?.length) return ['Step back', 'I cannot see you at all — is anything blocking the lens?'];
+  const parts = [...new Set(missing.map((k) => PART[k] ?? k))];
+  const list = parts.length > 1
+    ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`
+    : parts[0];
+  return [`I can't see your ${list}`, FIX[missing[0]] ?? 'Move the phone until all of you is in shot'];
+}
+
 function onFramingFrame(out, lm) {
   if (!out.visible) {
     resetFraming();
-    big('Step back', 'I need to see all of you in frame');
+    big(...framingFix(out.missing));
     return;
   }
 
