@@ -21,6 +21,10 @@ import * as explain from './explain.js';
 // Wires its own listeners on import; app.js only has to show the sheet and ask it to paint.
 import * as mood from './mood.js';
 import * as face from './face/checkin.js';
+import * as health from './health.js';
+import * as skin from './skin.js';
+import * as notify from './notify.js';
+import * as reminders from './reminders.js';
 
 const $ = (id) => document.getElementById(id);
 const el = {
@@ -530,6 +534,7 @@ function showToday() {
   el.todayGreet.textContent = profile.name ?? '';
   el.todayList.innerHTML = '';
   renderEatCards(profile);
+  renderHealthCoach();
 
   if (!session) {
     const next = planner.nextTrainingDay(now);
@@ -840,6 +845,7 @@ function renderEat() {
   el.waterNow.innerHTML = `${(ml / 1000).toFixed(1)}<small> / ${(wantMl / 1000).toFixed(1)} L</small>`;
   el.waterFill.style.width = `${Math.min(100, (ml / wantMl) * 100)}%`;
   el.waterFill.style.background = 'var(--eat)';
+  renderReminderSettings();
 
   // What you have already eaten, newest first. Removal is its own button rather than the whole
   // row: a mis-tap on a list you are only reading should not delete your lunch.
@@ -919,6 +925,42 @@ el.waterAdd.addEventListener('click', (e) => {
   const b = e.target.closest('button');
   if (b) logFood('water', Number(b.dataset.ml) / nutrition.FOODS.water.ml);
 });
+
+// ── hydration reminders ──────────────────────────────────────────────────────────────────
+//
+// A reminder preference, not a medical schedule — the window/interval only decide when a local
+// notification is allowed to fire, never what a healthy intake looks like. All scheduling math
+// lives in reminders.js/notify.js; this just reads/writes the preference and reports whether the
+// device actually granted permission, rather than pretending it did.
+
+function renderReminderSettings() {
+  const p = notify.getHydrationPrefs();
+  document.getElementById('reminders-enabled').checked = p.enabled;
+  document.getElementById('reminders-start').value = p.startHour;
+  document.getElementById('reminders-end').value = p.endHour;
+  document.getElementById('reminders-interval').value = p.intervalHours;
+  document.getElementById('reminders-window').hidden = !p.enabled;
+}
+
+async function applyReminderPrefs(patch) {
+  const msg = document.getElementById('reminders-msg');
+  const next = { ...notify.getHydrationPrefs(), ...patch };
+  notify.setHydrationPrefs(next);
+  const ok = await notify.syncHydrationReminders(next);
+  if (next.enabled && !ok) {
+    // Permission denied or no native runtime — say so rather than pretending it is scheduled.
+    notify.setHydrationPrefs({ ...next, enabled: false });
+    msg.textContent = 'Could not schedule reminders — check notification permission for this app.';
+  } else {
+    msg.textContent = '';
+  }
+  renderReminderSettings();
+}
+
+document.getElementById('reminders-enabled').addEventListener('change', (e) => applyReminderPrefs({ enabled: e.target.checked }));
+document.getElementById('reminders-start').addEventListener('change', (e) => applyReminderPrefs({ startHour: Number(e.target.value) }));
+document.getElementById('reminders-end').addEventListener('change', (e) => applyReminderPrefs({ endHour: Number(e.target.value) }));
+document.getElementById('reminders-interval').addEventListener('change', (e) => applyReminderPrefs({ intervalHours: Number(e.target.value) }));
 
 /** Write the food, log one of it, and put the form back. */
 function commitFood(id, food) {
@@ -1291,6 +1333,7 @@ let draft = null;
 
 function showProfile() {
   show(el.profile);
+  mood.renderKeySettings();
   draft = planner.getProfile();
   el.inName.value = draft.name ?? '';
   el.inBw.value = draft.bodyweight;
@@ -1864,10 +1907,134 @@ face.init({
   },
 });
 
+// ── Health Coach: one recommendation, computed by health.js, never by a model ─────────────
+//
+// Every number and every word of the reason text comes straight from health.selectNextBestAction,
+// which is pure and reuses evidence this app already trusts. This function only paints it and
+// wires the walkthrough — nothing here decides what to recommend, what counts as done, or when to
+// remind.
+//
+// The card has two views on the SAME action: OFFERED (title/reason, Start/Skip) and STARTED (the
+// live guidance for whichever step is actually next). There is no separate "current step" held in
+// memory — actionState() and the step content are both re-derived from real store data on every
+// render, which is what makes a walkthrough survive an app restart for free: a habit already
+// ticked, a lift already logged, stays ticked/logged, and the next render simply sees less left.
+const healthCard = () => document.getElementById('health-card');
+
+/** Every outcome funnels through here: the state machine, the reminder layer, then a repaint. */
+function recordAndSync(action, event) {
+  health.recordOutcome(action.id, action.domain, event);
+  notify.onOutcome(action, event, health.reminderDelayMs(action.id));
+  renderHealthCoach();
+}
+
+function renderHealthCoach() {
+  const ctx = health.context();
+  const { action, why } = health.selectNextBestAction(ctx);
+  const card = healthCard();
+  if (!action || action.tier === health.TIER.GOING_WELL) {
+    card.hidden = true;
+    return;
+  }
+  card.hidden = false;
+  document.getElementById('health-title').textContent = action.title;
+  document.getElementById('health-reason').textContent = action.reason;
+  document.getElementById('health-why-text').textContent = why.reasonSelected
+    + (why.notConcluded.length ? ` Not concluded: ${why.notConcluded.join(' ')}` : '');
+  document.getElementById('health-why').hidden = true;
+
+  const started = health.actionState(action.id, ctx.now, ctx.dayKey) === health.ACTION_STATE.STARTED;
+  document.getElementById('health-offered').hidden = started;
+  document.getElementById('health-steps').hidden = !started;
+  if (started) renderHealthSteps(action);
+
+  document.getElementById('btn-health-start').onclick = () => {
+    health.recordOutcome(action.id, action.domain, 'started');
+    renderHealthCoach();
+  };
+  document.getElementById('btn-health-skip').onclick = () => recordAndSync(action, 'skipped');
+  document.getElementById('btn-health-postpone').onclick = () => recordAndSync(action, 'postponed');
+  document.getElementById('btn-health-cancel').onclick = () => recordAndSync(action, 'cancelled');
+  document.getElementById('btn-health-why').onclick = () => {
+    const w = document.getElementById('health-why');
+    w.hidden = !w.hidden;
+  };
+}
+
+/** Paint the live guidance for a STARTED action and wire whatever completes it. Single-step
+ *  actions complete the whole action; skincare's multi-step routine completes one real habit at a
+ *  time (via skin.setHabitDone — the exact field the Skin panel reads) and only fires the action's
+ *  own 'completed' event once nothing is left, so this is never a second adherence counter. */
+function renderHealthSteps(action) {
+  const body = document.getElementById('health-step-body');
+  body.innerHTML = '';
+  const g = action.guidance;
+
+  if (!g || g.mode === 'single') {
+    const step = g?.step ?? { instruction: action.reason };
+    body.append(node('p', 'muted data', g?.intro ?? ''));
+    body.append(node('p', 'coachline', step.instruction));
+
+    if (step.quickLog) {
+      const row = node('div', 'row');
+      for (const [label, ml] of [['+ Glass', 250], ['+ Bottle', 500], ['+ Litre', 1000]]) {
+        const b = node('button', null, label);
+        b.type = 'button';
+        b.addEventListener('click', () => { logFood('water', ml / nutrition.FOODS.water.ml); renderHealthCoach(); });
+        row.append(b);
+      }
+      body.append(row);
+    }
+    if (step.deepLink === 'skin') {
+      const b = node('button', null, 'Open Skin');
+      b.type = 'button';
+      b.addEventListener('click', () => { show(el.mind); mood.openSkin(); });
+      body.append(b);
+    }
+    if (step.deepLink === 'training') {
+      const b = node('button', 'train', 'Open session');
+      b.type = 'button';
+      b.addEventListener('click', () => el.btnStartToday.click());
+      body.append(b);
+    }
+    if (step.boundary) {
+      const b = step.boundary;
+      body.append(node('p', 'muted data', `What we know: ${b.known.join(', ') || 'nothing yet'}`));
+      body.append(node('p', 'muted data', `What we don't know: ${b.missing.join(', ') || 'nothing outstanding'}`));
+      body.append(node('p', 'muted data', `What it does not measure: ${b.doesNotMeasure}`));
+    }
+
+    const done = node('button', 'train', 'Done');
+    done.type = 'button';
+    done.style.marginTop = '10px';
+    done.addEventListener('click', () => recordAndSync(action, 'completed'));
+    body.append(done);
+    return;
+  }
+
+  // steps mode (skincare): one real, already-configured habit at a time — never invented.
+  const step = g.steps[0];
+  body.append(node('p', 'muted data', g.intro));
+  body.append(node('p', 'coachline', step.title));
+  body.append(node('p', 'muted data', step.instruction));
+
+  const done = node('button', 'train', 'Done');
+  done.type = 'button';
+  done.style.marginTop = '10px';
+  done.addEventListener('click', () => {
+    const doneIds = new Set(skin.setHabitDone(step.id, true));
+    const remaining = skin.HABITS.filter((h) => !doneIds.has(h.id));
+    if (!remaining.length) recordAndSync(action, 'completed');
+    else renderHealthCoach();
+  });
+  body.append(done);
+}
+
 el.btnFace.addEventListener('click', () => { show(el.face); face.open(); });
 el.btnFaceBack.addEventListener('click', () => { face.close(); showToday(); });
 
 el.btnMind.addEventListener('click', () => { show(el.mind); mood.render(); });
+document.getElementById('mind-go-profile')?.addEventListener('click', showProfile);
 el.btnMindBack.addEventListener('click', showToday);
 el.btnProgressBack.addEventListener('click', showToday);
 el.btnProgressDone.addEventListener('click', showToday);
@@ -2079,6 +2246,10 @@ el.voice.addEventListener('change', () => { voice.enabled = el.voice.checked; })
 window.addEventListener('pagehide', () => stopCamera(stream));
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+
+// Re-applies whatever hydration-reminder preference was last saved — a no-op if it already
+// matches what's scheduled (see notify.syncHydrationReminders), so a restart never duplicates.
+notify.initReminders();
 
 // First run has nothing to plan from, so ask before showing an empty day.
 if (planner.hasProfile()) showToday();

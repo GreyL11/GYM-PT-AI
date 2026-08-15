@@ -13,11 +13,12 @@ import { CHECKS, OPTIONS, score, band, risk, DUE_DAYS, daysSince } from './check
 import { talk, testKey, readSkinNote, Blocked, BLOCKED_REPLY } from './chat.js';
 import { digest, RULES } from './digest.js';
 import * as skin from './skin.js';
+import * as health from './health.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-const PANELS = ['talk', 'day', 'skin', 'trends'];
+const PANELS = ['talk', 'day', 'skin', 'hormonal', 'trends'];
 const FACES = ['\u{1F61E}', '\u{1F615}', '\u{1F610}', '\u{1F642}', '\u{1F604}'];
 const WINDOW = 30;
 const TOMORROW = () => store.shiftKey(1);
@@ -34,6 +35,7 @@ export function render() {
   if (panel === 'talk') renderTalk();
   if (panel === 'day') renderDay();
   if (panel === 'skin') renderSkin();
+  if (panel === 'hormonal') renderHormonal();
   if (panel === 'trends') renderTrends();
 }
 
@@ -57,6 +59,13 @@ export function openTalk(prefill) {
   box.focus();
 }
 
+/** Deep-link from the Health Coach card into the actual Skin panel — used when the coaching
+ *  action is "log today's skin", which needs the score/flags form this file already owns. */
+export function openSkin() {
+  panel = 'skin';
+  render();
+}
+
 // ── talk ─────────────────────────────────────────────────────────────────────────────────
 
 // The transcript is also the scroll container — see the #mind-scroll rule in index.html.
@@ -74,11 +83,11 @@ function bubble(role, text = '') {
 let painted = false;
 
 function renderTalk() {
+  // Key setup and its status live in Profile → AI key now — this screen is the conversation and
+  // nothing else. All it needs from the key is whether one exists at all.
   const key = store.getSetting('geminiKey', '');
   $('mind-composer').hidden = !key;
-  $('mind-setup').hidden = !!key;
-  $('mind-key-check').hidden = !key;
-  if (key) renderShare();
+  $('mind-no-key').hidden = !!key;
 
   if (painted) return;
   painted = true;
@@ -105,10 +114,20 @@ async function send(text) {
    * Rebuilt for every message rather than cached: it is local arithmetic over data already in
    * memory, and a stale brief would have the model answering about last Tuesday. Off means the
    * conversation goes up with nothing but what you typed, which is what it did before.
+   *
+   * Wrapped, and that wrapping is load-bearing rather than defensive habit. This runs BEFORE the
+   * try/catch below — everything else in this app fails to a bubble or a template sentence, and a
+   * throw here, unguarded, would abort send() with the user's own message already on screen and
+   * nothing whatsoever after it: no reply, no error, the Send button never re-enabled. That is a
+   * silent-failure shape this codebase does not otherwise have, and it is worse than sending the
+   * message with no personal brief attached.
    */
-  const facts = store.getSetting('shareData', true)
-    ? { rules: RULES, data: digest() }
-    : null;
+  let facts = null;
+  if (store.getSetting('shareData', true)) {
+    try {
+      facts = { rules: RULES, data: digest() };
+    } catch { /* the conversation still goes up — just without your numbers this time */ }
+  }
 
   $('mind-send').disabled = true;
   const reply = bubble('assistant');
@@ -170,11 +189,41 @@ $('mind-input').addEventListener('keydown', (e) => {
 $('mind-save-key').addEventListener('click', async () => {
   const v = $('mind-key').value.trim();
   if (!v) return;
-  store.setSetting('geminiKey', v);
+  const status = $('mind-key-status');
+  try {
+    store.setSetting('geminiKey', v);
+  } catch (err) {
+    // `write()` is a synchronous localStorage call, and on this one path a failure has nowhere
+    // else to go: nothing downstream runs, the screen stays exactly as it was, and pasting the key
+    // again changes nothing — which reads as "I gave it a key and nothing moved". Every other
+    // failure in this file ends up on screen as a bubble or a message; this is the one write that
+    // did not, so it is the one most likely to go silent on a device where storage is restricted,
+    // full, or blocked.
+    status.hidden = false;
+    status.textContent = `Could not save: ${err.message}`;
+    status.style.color = '#ff8a80';
+    return;
+  }
   $('mind-key').value = '';
-  render();
+  status.hidden = true;
+  renderKeySettings();
   await checkKey();
 });
+
+/**
+ * The Profile → AI key section: setup form or status card, whichever applies. Called when Profile
+ * opens (app.js) and after anything here changes the key — never by Talk, which only needs to know
+ * whether a key exists at all (see renderTalk()).
+ */
+export function renderKeySettings() {
+  const key = store.getSetting('geminiKey', '');
+  // The explainer is onboarding — said once, before a key exists. The input and Save button are
+  // NOT part of this toggle: they stay available always, so replacing a wrong or invalid key never
+  // requires hitting "Forget key" first just to get the box back.
+  $('mind-explainer').hidden = !!key;
+  $('mind-key-check').hidden = !key;
+  if (key) renderShare();
+}
 
 async function checkKey() {
   const key = store.getSetting('geminiKey', '');
@@ -214,7 +263,7 @@ $('mind-forget-key').addEventListener('click', () => {
   store.setSetting('geminiKey', '');
   $('mind-key-result').textContent = 'Saved on this device.';
   $('mind-key-result').style.color = '';
-  render();
+  renderKeySettings();
 });
 
 // ── skin ─────────────────────────────────────────────────────────────────────────────────
@@ -248,6 +297,38 @@ function renderSkin() {
         + `<p class="muted data" style="margin:2px 0 10px">`
         + `${r.lowScore} on the ${r.lowDays} lower days · ${r.highScore} on the ${r.highDays} higher</p>`).join('')
     : `<p class="muted">Not enough logged yet to compare anything honestly.</p>`;
+}
+
+// ── hormonal ─────────────────────────────────────────────────────────────────────────────
+// Display wiring only. Every state comes from health.js, which computes nothing new — it only
+// classifies what t_inputs.js already decided. This panel cannot say more than that module does.
+
+const FACTOR_ICON = { SUPPORTED: '✓', PARTIAL: '~', ABSENT: '?' };
+
+function factorLine(label, f, text) {
+  return `<div class="line"><span class="k">${FACTOR_ICON[f.state]} ${esc(label)}</span>`
+    + `<span class="v muted data">${esc(text)}</span></div>`;
+}
+
+function renderHormonal() {
+  $('hormonal-boundary').textContent = health.HORMONAL_BOUNDARY;
+
+  const ctx = health.context();
+  const f = health.hormonalFactors(ctx);
+  $('hormonal-factors').innerHTML = [
+    factorLine('Sleep', f.sleep, f.sleep.state === 'ABSENT'
+      ? `${f.sleep.detail.nights} nights logged` : `${f.sleep.detail.avg}h avg, ${f.sleep.detail.nights} nights`),
+    factorLine('Training', f.training, `${f.training.detail.days} days in 28d`),
+    factorLine('Weight trend', f.weight, f.weight.state === 'ABSENT'
+      ? `${f.weight.detail.points} weigh-in(s)` : `${f.weight.detail.kg > 0 ? '+' : ''}${f.weight.detail.kg} kg`),
+    factorLine('Nutrition', f.nutrition, `${f.nutrition.detail.loggedDays} of 28 days logged`),
+    factorLine('Lab evidence', f.lab, 'none recorded'),
+  ].join('');
+
+  const action = health.candidates(ctx).find((a) => a.domain === 'hormonalLifestyle');
+  $('hormonal-action').textContent = action
+    ? `${action.title}. ${action.reason}`
+    : 'Not enough evidence for personalized hormonal-health guidance yet.';
 }
 
 /** Single- or multi-select chip row. Single-select is used for the 1–5 score. */

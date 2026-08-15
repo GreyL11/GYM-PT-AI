@@ -98,6 +98,34 @@ export function scored(days = store.days()) {
     .sort((a, b) => a.key.localeCompare(b.key));
 }
 
+/**
+ * Mark one routine habit done (or not) for a day. The exact same store field the Mind → Skin
+ * panel's chips read and write (`store.day().skin.habits`) — there is only this one place
+ * adherence lives, so a habit checked off through a coach walkthrough and one checked off through
+ * the Skin panel are the same fact, never two counters to drift apart.
+ */
+export function setHabitDone(habitId, done, key = store.dayKey()) {
+  const cur = store.day(key).skin ?? { score: null, flags: [], habits: [] };
+  const habits = done
+    ? [...new Set([...(cur.habits ?? []), habitId])]
+    : (cur.habits ?? []).filter((h) => h !== habitId);
+  store.patchDay({ skin: { ...cur, habits } }, key);
+  return habits;
+}
+
+/**
+ * Of the last `n` days with a skin entry, how many had every routine habit logged.
+ *
+ * Adherence, not appearance — this counts whether the routine was followed, never whether skin
+ * looked any different for it. Lets the coach say "7 of your last 10 recorded evening routines"
+ * without ever implying the routine changed anything.
+ */
+export function routineAdherence(n = 10, days = store.days()) {
+  const rows = scored(days).slice(-n);
+  const complete = rows.filter((r) => HABITS.every((h) => r.habits.includes(h.id))).length;
+  return { complete, of: rows.length };
+}
+
 /** Servings of a food group eaten on a given calendar day. */
 function servingsOn(key, group, meals) {
   return meals

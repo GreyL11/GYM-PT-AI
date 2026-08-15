@@ -56,6 +56,16 @@
     --mono: 'JetBrains Mono', ui-monospace, monospace;
   }
   * { box-sizing: border-box; }
+  /* [hidden] means "this element must not render" — that is the whole point of the attribute, and
+     every visibility toggle in this app's JS (`el.x.hidden = true/false`) depends on it actually
+     doing that. But almost every component here sets its own `display` (`.card`, `#mind-composer`,
+     `.sheet .body`, …) at a specificity the browser's default `[hidden]{display:none}` cannot beat
+     — same-specificity author CSS always wins over the UA stylesheet, so those elements kept
+     rendering, fully interactive, regardless of `.hidden`. Found live: Mind's key-entry form and
+     its "key works" card stacked on top of each other because .hidden had no effect on either.
+     One `!important` rule here is the fix that actually holds for every element, present and
+     future, rather than a narrow override added again each time this bites somewhere new. */
+  [hidden] { display: none !important; }
   html, body { height: 100%; margin: 0; overscroll-behavior: none; }
   body {
     background: var(--bg); color: var(--on-surface); font: 500 20px/28px var(--sans);
@@ -380,7 +390,13 @@
   .err { color: #ff8a80; margin: 0; font: 700 14px/20px var(--mono); }
 
   /* ── face check-in ───────────────────────────────────────────────────────────────────── */
-  #face-stage { position: relative; width: 100%; aspect-ratio: 3/4; background: #000; overflow: hidden; }
+  /* flex-shrink: 0 is load-bearing, not decoration. `.sheet .body` scrolls (overflow-y: auto), and
+     per spec a flex item's automatic min-height resolves to 0 — not its content size — inside any
+     scrollable flex container. Without this, aspect-ratio does nothing once the text below the
+     camera grows past one screen: the stage quietly gives up its height to make room instead of the
+     body just scrolling, which is exactly what happened when the validation panel's copy was added
+     underneath it. The camera view must never be the thing that compresses. */
+  #face-stage { position: relative; width: 100%; aspect-ratio: 3/4; background: #000; overflow: hidden; flex-shrink: 0; }
   #face-cam, #face-overlay { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
   /* Mirrored, because a preview that moves the opposite way to your head is unusable. The region
      maths is told about the flip separately — see regions({mirrored}). */
@@ -620,10 +636,6 @@
   .tabs button.on { border-top-color: var(--accent); color: var(--accent); }
 
   /* ── mind ────────────────────────────────────────────────────────────────────────────── */
-  /* `.sheet .body` sets display:flex, which outranks the browser's own [hidden]{display:none} —
-     so a panel with the hidden attribute still painted, and all three stacked on top of each
-     other. Every other sheet gets away without this because it has exactly one .body. */
-  .sheet .body[hidden] { display: none; }
   /* Talk is the one panel that does not scroll as a whole: the composer has to stay under your
      thumb while the transcript moves behind it, so the scrolling is handed to #mind-scroll. */
   #mind-panel-talk { overflow: hidden; }
@@ -828,6 +840,41 @@
         <button id="btn-start-today" class="train wide">Start</button>
       </div>
 
+      <!-- The Health Coach: one recommendation, not a dashboard. Reads candidate actions from
+           health.js (deterministic, no model) and shows exactly one — the rest of the reasoning
+           is one tap away behind "Why?" rather than dumped on screen. -->
+      <div class="card" id="health-card" hidden>
+        <div class="line">
+          <span class="cardlabel" style="color:var(--train)">Your next best action</span>
+        </div>
+        <p id="health-title" class="coachline"></p>
+        <p id="health-reason" class="muted data"></p>
+
+        <!-- OFFERED: not yet started. -->
+        <div id="health-offered">
+          <div class="row" style="margin-top:10px">
+            <button id="btn-health-start" class="train">Start</button>
+            <button id="btn-health-skip">Skip</button>
+          </div>
+        </div>
+
+        <!-- STARTED: live guidance for whichever step is actually next — content is painted by
+             app.js's renderHealthSteps(), which reads it straight from the action's own
+             `guidance`, never inventing one. -->
+        <div id="health-steps" hidden style="margin-top:6px">
+          <div id="health-step-body"></div>
+          <button id="btn-health-cancel" type="button" style="margin-top:8px;font-size:12px">Cancel</button>
+        </div>
+
+        <div class="row" style="margin-top:10px">
+          <button id="btn-health-postpone">Later</button>
+        </div>
+        <button id="btn-health-why" type="button" style="margin-top:10px;font-size:12px">Why this?</button>
+        <div id="health-why" hidden style="margin-top:8px">
+          <p class="muted data" id="health-why-text"></p>
+        </div>
+      </div>
+
       <div class="section">
         <h2 class="sectionlabel">Today's plan</h2>
         <div id="todaylist" class="lifts"></div>
@@ -902,10 +949,10 @@
              about anyone's skin. -->
         <div class="card">
           <span class="cardlabel">What this is doing</span>
-          <p class="coachline">Measuring how consistently the camera can see your face. It is not
-            reading your skin, and it will not, until the measurements have been shown to hold still
-            across many check-ins.</p>
-          <p class="muted data">Building your personal baseline · appearance signals still being validated</p>
+          <p class="coachline">Right now, nothing. This screen can check whether the camera sees your
+            face well enough to measure — but it only records when a capture session is running, and
+            it is not reading your skin either way.</p>
+          <p class="muted data">No product feature here yet · appearance signals still being validated</p>
         </div>
         <p class="muted">Face the camera in even light and hold still. The picture is measured on
           this phone and thrown away — only numbers are kept, and no image is ever sent anywhere.</p>
@@ -1025,6 +1072,25 @@
           <button type="button" data-ml="500">+ Bottle</button>
           <button type="button" data-ml="1000">+ Litre</button>
         </div>
+
+        <!-- Local device reminders only — a preference for when a nudge is allowed to fire, not a
+             hydration prescription. See reminders.js/notify.js. -->
+        <div class="row" style="margin-top:10px;align-items:center;gap:8px">
+          <label for="reminders-enabled" style="flex:1;font-size:13px">Remind me to drink water</label>
+          <input type="checkbox" id="reminders-enabled">
+        </div>
+        <div class="row" id="reminders-window" style="gap:10px;align-items:center" hidden>
+          <label style="font-size:12px">From
+            <input type="number" id="reminders-start" min="0" max="23" style="width:48px">
+          </label>
+          <label style="font-size:12px">to
+            <input type="number" id="reminders-end" min="1" max="24" style="width:48px">
+          </label>
+          <label style="font-size:12px">every
+            <input type="number" id="reminders-interval" min="1" max="12" style="width:40px">h
+          </label>
+        </div>
+        <p class="muted data" id="reminders-msg" style="margin-top:4px"></p>
       </div>
 
       <div>
@@ -1227,6 +1293,57 @@
         <button id="btn-restore">Replace everything</button>
         <p id="restore-err" class="err"></p>
       </details>
+
+      <!-- Was on the Mind → Talk screen, permanently on top of the composer whether it had
+           anything to say or not. Key management belongs beside Backup, not on the screen you
+           open to actually talk — that screen now shows only your conversation. -->
+      <details id="ai-key">
+        <summary>AI key</summary>
+
+        <!-- Explains the deal once, before a key exists — not repeated once one is saved and
+             working, which is why this collapses away and the input below does not. -->
+        <div id="mind-explainer">
+          <p class="muted">The check-in talks to Google's Gemini API straight from this phone. There
+            is no server in between and no account — your key and your messages go directly from here
+            to Google.</p>
+          <p class="muted"><b>Sent:</b> what you type, and — while "Answer using my data" is on — a
+            summary of your logged numbers: training, sleep, weight, eating.
+            <b>Never sent:</b> camera frames, pose data, or face images. Those are read on this device
+            and thrown away frame by frame; nothing in this app has ever kept an image.</p>
+          <p class="muted"><b>Which key you paste changes what Google may do with it.</b> Google's
+            terms say that on the free tier, submitted content is used to improve their products and
+            human reviewers may read it; on a billing-enabled key, that it is not used to improve
+            their products. The app behaves identically either way — the difference is the key.
+            <a href="https://ai.google.dev/gemini-api/terms">Gemini API terms</a> ·
+            <a href="https://aistudio.google.com/apikey">your keys</a></p>
+          <p class="muted">The key is stored on this device in plain text — anyone holding the
+            unlocked phone can read it — so set a spend limit on it. Everything else in this app
+            works without one.</p>
+        </div>
+
+        <!-- ALWAYS here, key or no key — pasting a new value and hitting Save replaces whatever
+             was there before. Previously this input existed only until a key was first saved, so
+             fixing a wrong or invalid key had no visible way in short of "Forget key" first. -->
+        <input type="password" id="mind-key" placeholder="AIza…" autocomplete="off" spellcheck="false">
+        <button id="mind-save-key" class="train" type="button">Save key</button>
+        <p id="mind-key-status" class="muted data" hidden></p>
+
+        <!-- Once a key is saved there is nowhere else that says whether it actually works: the
+             Stats card fails silently by design, and the chat only errors when you send something. -->
+        <div id="mind-key-check" hidden>
+          <div class="line">
+            <span class="cardlabel" style="color:var(--train)">Current key</span>
+            <button id="mind-test-key" type="button" style="min-height:36px;padding:0 12px;font-size:12px">Test</button>
+          </div>
+          <p id="mind-key-result" class="muted data">Saved on this device.</p>
+          <label class="switch" style="margin-top:4px">
+            <span>Answer using my data</span>
+            <input type="checkbox" id="mind-share" checked>
+          </label>
+          <p class="muted data" id="mind-share-note"></p>
+          <button id="mind-forget-key" type="button" style="min-height:40px;font-size:12px">Forget key</button>
+        </div>
+      </details>
     </div>
     <div class="foot"><button id="btn-save-profile" class="primary">Save</button></div>
   </section>
@@ -1394,47 +1511,17 @@
       <div style="width:44px"></div>
     </header>
 
-    <!-- talk -->
+    <!-- talk — chat and nothing else. Key setup and its status live in Profile → AI key. -->
     <div class="body" id="mind-panel-talk">
       <div id="mind-scroll"></div>
-      <div class="card" id="mind-setup" hidden>
-        <span class="cardlabel" style="color:var(--train)">Set up</span>
-        <p class="muted">The check-in talks to Google's Gemini API straight from this phone. There
-          is no server in between and no account — your key and your messages go directly from here
-          to Google.</p>
-        <p class="muted"><b>Sent:</b> what you type, and — while "Answer using my data" is on — a
-          summary of your logged numbers: training, sleep, weight, eating.
-          <b>Never sent:</b> camera frames, pose data, or face images. Those are read on this device
-          and thrown away frame by frame; nothing in this app has ever kept an image.</p>
-        <p class="muted"><b>Which key you paste changes what Google may do with it.</b> Google's
-          terms say that on the free tier, submitted content is used to improve their products and
-          human reviewers may read it; on a billing-enabled key, that it is not used to improve
-          their products. The app behaves identically either way — the difference is the key.
-          <a href="https://ai.google.dev/gemini-api/terms">Gemini API terms</a> ·
-          <a href="https://aistudio.google.com/apikey">your keys</a></p>
-        <p class="muted">The key is stored on this device in plain text — anyone holding the
-          unlocked phone can read it — so set a spend limit on it. Everything else on this screen
-          works without one.</p>
-        <input type="password" id="mind-key" placeholder="AIza…" autocomplete="off" spellcheck="false">
-        <button id="mind-save-key" class="train" type="button">Save key</button>
-        <p id="mind-key-status" class="muted data" hidden></p>
+
+      <div class="card" id="mind-no-key" hidden>
+        <span class="cardlabel" style="color:var(--train)">Talk needs a key</span>
+        <p class="muted">Add a free Gemini key in Profile to start chatting. Everything else in the
+          app works without one.</p>
+        <button id="mind-go-profile" class="train" type="button">Go to Profile</button>
       </div>
 
-      <!-- Once a key is saved there is nowhere else that says whether it actually works: the Stats
-           card fails silently by design, and the chat only errors when you send something. -->
-      <div class="card" id="mind-key-check" hidden>
-        <div class="line">
-          <span class="cardlabel" style="color:var(--train)">API key</span>
-          <button id="mind-test-key" type="button" style="min-height:36px;padding:0 12px;font-size:12px">Test</button>
-        </div>
-        <p id="mind-key-result" class="muted data">Saved on this device.</p>
-        <label class="switch" style="margin-top:4px">
-          <span>Answer using my data</span>
-          <input type="checkbox" id="mind-share" checked>
-        </label>
-        <p class="muted data" id="mind-share-note"></p>
-        <button id="mind-forget-key" type="button" style="min-height:40px;font-size:12px">Forget key</button>
-      </div>
       <form id="mind-composer">
         <textarea id="mind-input" rows="1" placeholder="How was today?" autocomplete="off"></textarea>
         <button id="mind-send" class="train" type="submit">Send</button>
@@ -1526,10 +1613,31 @@
       </div>
     </div>
 
+    <!-- hormonal — lifestyle conditions, never a hormone measurement. Every state below comes
+         straight from t_inputs.js's own verdicts (health.js only classifies them); nothing here
+         computes a new number. -->
+    <div class="body" id="mind-panel-hormonal" hidden>
+      <div class="card">
+        <span class="cardlabel">What we don't know</span>
+        <p class="muted" id="hormonal-boundary"></p>
+      </div>
+
+      <div class="card">
+        <span class="cardlabel">Factors we can assess</span>
+        <div id="hormonal-factors" style="display:flex;flex-direction:column;gap:8px;margin-top:6px"></div>
+      </div>
+
+      <div class="card">
+        <span class="cardlabel" style="color:var(--train)">Current focus</span>
+        <p id="hormonal-action" class="coachline"></p>
+      </div>
+    </div>
+
     <div class="foot tabs">
       <button id="mind-tab-talk"><svg class="ic"><use href="#i-talk"/></svg>Talk</button>
       <button id="mind-tab-day"><svg class="ic"><use href="#i-today"/></svg>Today</button>
       <button id="mind-tab-skin"><svg class="ic"><use href="#i-today"/></svg>Skin</button>
+      <button id="mind-tab-hormonal"><svg class="ic"><use href="#i-today"/></svg>Hormonal</button>
       <button id="mind-tab-trends"><svg class="ic"><use href="#i-stats"/></svg>Trends</button>
     </div>
   </section>

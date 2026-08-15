@@ -24,6 +24,7 @@ import * as insights from './insights.js';
 import * as nutrition from './nutrition.js';
 import * as planner from './planner.js';
 import * as skin from './skin.js';
+import * as health from './health.js';
 import * as store from './store.js';
 import * as tInputs from './t_inputs.js';
 
@@ -136,6 +137,8 @@ export function digest(profile = planner.getProfile()) {
   );
 
   const today = planner.today();
+  const coachAction = health.candidates(health.context())
+    .find((a) => a.tier === health.TIER.ACTIONABLE_NOW) ?? null;
   const entries = nutrition.dayEntries();
   const targets = nutrition.targets(profile);
   const eaten = nutrition.totals(entries);
@@ -221,6 +224,16 @@ export function digest(profile = planner.getProfile()) {
       eatingRead: loggedDays.length >= 3 ? nutrition.coachLine(profile, series) : null,
       skinRead: skin.scored().length >= 8 ? skin.advice().text : null,
     },
+
+    // The Health Coach's own current pick, so a question like "why is this my next thing" gets an
+    // answer grounded in the same reasoning the Today card shows — never a second opinion the model
+    // invented from the raw facts above. health.js computed this; digest() only carries it along.
+    coach: coachAction ? {
+      action: coachAction.title,
+      reason: coachAction.reason,
+      domain: coachAction.domain,
+      limitation: coachAction.limitation,
+    } : null,
   }) ?? {};
 }
 
@@ -242,4 +255,5 @@ export const RULES = `The user's own logged data follows as JSON. Use it when it
 - "lastDecision" is a decision the app already made; "basis" holds the numbers it used and the threshold they were compared against. Explain it, never re-decide it. "decisionEvidence": "none recorded" means no decision was saved and none can be recovered — do not infer one from a load that changed.
 - Separate what was observed from what you think follows from it, so they can tell which is which. Two things moving together in the same weeks is not one causing the other, and this data cannot show that it is.
 - Numbers are context for a conversation, not a report. Do not list them back unless asked; answer the question.
+- "coach" is the app's own current top recommendation and its "limitation" line. If they ask why this is the suggestion, explain THIS reason — do not invent a different one from the raw numbers, and repeat the limitation if it mentions testosterone: this app cannot measure hormone levels from lifestyle data, ever.
 - Never diagnose anything, never estimate a hormone level, and never say whether a figure is normal, healthy, low or high. That needs a doctor and a blood test.`;

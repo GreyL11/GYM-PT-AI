@@ -17,6 +17,12 @@ android/gradle.properties.bak
 *.apk
 *.aab
 *.keystore
+# The debug keystore IS committed, deliberately — see the signingConfigs comment in
+# android/app/build.gradle. It signs debug builds only, its password is the well-known Android
+# default ("android"), and it must be identical on every machine and every CI run: a different
+# debug keystore per build is what forces every release to be installed as a fresh app, wiping
+# local storage — including the saved API key — on every single update.
+!android/app/debug.keystore
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 graft/

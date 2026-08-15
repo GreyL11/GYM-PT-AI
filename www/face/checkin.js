@@ -210,31 +210,45 @@ function paint(lm, guidance, live) {
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+  // Is anything actually going to happen if they hold still? Everything below depends on it.
+  const armed = Boolean(record.session());
+
   if (lm) {
     const a = anatomy(lm);
     if (a) {
       // The regions themselves, faintly — so the person can see what is being looked at rather
-      // than being scanned by something opaque.
-      ctx.strokeStyle = steady.ready ? '#7ee2a8' : '#ffffff55';
+      // than being scanned by something opaque. Green only means "about to capture", so it is
+      // reserved for when a capture is genuinely coming.
+      ctx.strokeStyle = armed && steady.ready ? '#7ee2a8' : '#ffffff55';
       ctx.lineWidth = Math.max(2, canvas.width * 0.003);
       for (const poly of Object.values(a.regions)) outline(ctx, poly, a.frame, canvas);
     }
   }
 
+  // THE SCREEN MUST NOT CLAIM TO BE DOING SOMETHING IT IS NOT.
+  //
+  // Captures only happen inside a collection session. Without one, holding still used to fill the
+  // bar to 100% and print "Hold it — measuring" while nothing whatsoever happened — which is the
+  // exact failure this entire feature began with, reintroduced by the change that added sessions.
+  // So the bar tracks progress toward a real capture and stays empty when there is none to make.
   $('face-guide').textContent = guidance.instruction
-    ?? (steady.ready ? 'Hold it — measuring' : 'Hold still');
+    ?? (!armed ? 'Nothing is being recorded'
+      : steady.ready ? 'Holding still — capturing now'
+        : 'Hold still');
 
-  const pct = Math.round((steady.frames / q.STEADY_FRAMES) * 100);
+  const pct = armed ? Math.round((steady.frames / q.STEADY_FRAMES) * 100) : 0;
   $('face-progress').style.width = `${Math.min(100, pct)}%`;
-  // Was "capture confidence 72%", which told a person nothing they could act on and hid the one
-  // distinction that matters: a capture can be unusable, or usable but not comparable.
-  $('face-state').textContent = live ? checkLine(live) : '';
+  $('face-state').textContent = live ? checkLine(live, armed) : '';
 }
 
-const checkLine = (gate) => {
+const checkLine = (gate, armed) => {
+  // What to fix always comes first — it is the only thing they can act on.
   if (gate.failures.length) return `${q.LABELS[gate.failures[0]]} — ${gate.checks[gate.failures[0]].reason}`;
+  // Framing is fine and nothing is being recorded. Say so, and say what would change that, rather
+  // than "Ready" — which reads as a promise that something is about to happen.
+  if (!armed) return 'Framing is good. Tap Validate to start a capture session.';
   if (!steady.ready) return 'Hold still';
-  return 'Ready';
+  return 'Capturing';
 };
 
 function outline(ctx, poly, f, canvas) {

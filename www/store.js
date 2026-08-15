@@ -7,6 +7,10 @@ const blank = {
   loads: {}, thresholds: {}, log: [], profile: null, reps: {}, meals: [], foods: {}, weights: [],
   // Device settings, as opposed to training ones: which pose model this phone can afford to run.
   settings: {},
+  // Health Coach outcome log — one row per offer/complete/skip/postpone of a candidate action. See
+  // health.js. Same append-cap pattern as `verdicts`, and for the same reason: this is what makes
+  // "you tend to complete hydration in the afternoon" an inspectable fact instead of a vibe.
+  actions: [],
   // Boxing rounds live apart from `log`. That array is set-shaped — reps, load, target — and a
   // round has none of those; forcing it in would mean every lifting analytic had to filter it out.
   rounds: [],
@@ -54,6 +58,26 @@ export function appendRound(entry) {
   const { rounds } = read();
   write({ rounds: [...rounds, entry].slice(-500) });
 }
+
+/** One outcome event for a candidate action: {id, domain, event, at, ...}. */
+export function appendAction(entry) {
+  const { actions } = read();
+  const row = { at: new Date().toISOString(), ...entry };
+  write({ actions: [...actions, row].slice(-1000) });
+  return row;
+}
+
+export const actions = () => read().actions;
+
+/** Every event ever logged for one candidate-action id, oldest first. */
+export const actionHistory = (id) => read().actions.filter((a) => a.id === id)
+  .sort((a, b) => a.at.localeCompare(b.at));
+
+/** The most recent event for an id, or null if it has never been offered. */
+export const lastActionEvent = (id) => {
+  const h = actionHistory(id);
+  return h.length ? h.at(-1) : null;
+};
 
 export const getSetting = (key, fallback) => read().settings[key] ?? fallback;
 export const setSetting = (key, value) => write({ settings: { ...read().settings, [key]: value } });
@@ -181,7 +205,7 @@ export function importAll(text) {
   const data = parsed?.data ?? parsed;
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('That is not a backup.');
   for (const [key, shape] of [['log', Array], ['meals', Array], ['weights', Array], ['loads', Object],
-    ['chat', Array], ['checks', Array], ['days', Object], ['verdicts', Array]]) {
+    ['chat', Array], ['checks', Array], ['days', Object], ['verdicts', Array], ['actions', Array]]) {
     if (key in data && (shape === Array ? !Array.isArray(data[key]) : typeof data[key] !== 'object')) {
       throw new Error(`Backup is damaged: "${key}" is the wrong shape.`);
     }
