@@ -13,16 +13,14 @@
 // MediaPipe's left/right are the SUBJECT's left and right, not the viewer's. A selfie camera also
 // mirrors the image. Both facts are handled in one place — see `mirrored` in regions().
 
-/** Extracted from FaceLandmarker.FACE_LANDMARKS_* — see the module note above. */
-export const EYE = {
-  left: [249, 263, 362, 373, 374, 380, 381, 382, 384, 385, 386, 387, 388, 390, 398, 466],
-  right: [7, 33, 133, 144, 145, 153, 154, 155, 157, 158, 159, 160, 161, 163, 173, 246],
-};
-export const IRIS = { left: [474, 475, 476, 477], right: [469, 470, 471, 472] };
-export const FACE_OVAL = [
-  10, 21, 54, 58, 67, 93, 103, 109, 127, 132, 136, 148, 149, 150, 152, 162, 172, 176, 234,
-  251, 284, 288, 297, 323, 332, 338, 356, 361, 365, 377, 378, 379, 389, 397, 400, 454,
-];
+import { RINGS } from './topology.js';
+
+// Was three hand-copied index lists. They are now read off topology.js, which is generated from the
+// library's own constants — because two copies of the same indices is exactly the drift this file's
+// header warns about, and one of them would eventually be the stale one.
+export const EYE = { left: RINGS.leftEye.vertices, right: RINGS.rightEye.vertices };
+export const IRIS = { left: RINGS.leftIris.vertices, right: RINGS.rightIris.vertices };
+export const FACE_OVAL = RINGS.faceOval.vertices;
 
 /** Outer eye corners, the two most stable points on a face for alignment. From the eye sets. */
 const OUTER_EYE = { left: 263, right: 33 };
@@ -177,6 +175,247 @@ export function regions(lm, { mirrored = false } = {}) {
     nose: box(0, 0.28, 0.26),
     // Between the lower lip and the chin point.
     chin: box(0, 0.95, 0.30),
+  };
+}
+
+// ── anatomical geometry ──────────────────────────────────────────────────────────────────
+//
+// Everything above places SQUARES by formula, and that is all the per-frame framing gate needs: it
+// only asks "is the area I would measure inside the picture", thirty times a second, on a phone.
+//
+// Everything below places POLYGONS built out of the mesh's own contour rings — the actual eyebrows,
+// the actual eye lids, the actual face oval. That costs more and is computed once per capture, and
+// it buys two things a square cannot have:
+//
+//   The boundaries are anatomy. A forehead bounded by the brow ring underneath and the oval arc
+//   above is the forehead on any face; a square 0.45 eye-distances up is the forehead on some.
+//
+//   THERE IS NO `mirrored` FLAG DOWN HERE, and its absence is the point. Squares had to be placed
+//   by formula, so a selfie-flipped image had to flip the formula, and getting that wrong swapped
+//   left and right for every asymmetry signal. Landmark 263 is the subject's left eye wherever it
+//   lands in the frame, so a polygon built from it needs no such correction and cannot acquire one.
+//
+// These polygons are deliberately GENEROUS. They propose an area; mask.js disposes of it — clipping
+// to the oval, subtracting eyes, brows, lips and irises, eroding the edge, and finally vetoing
+// against the skin segmentation. A region that is slightly too big survives that. One that is too
+// small has already thrown away skin nobody can get back.
+
+/** Region polygons are inset from their bounding anatomy by these fractions of eye distance. */
+export const INSET = {
+  // Distance kept between the brow ring and the bottom of the forehead patch.
+  browClearance: 0.10,
+  // Fraction of the brow→oval-top span left unmeasured at the top. The hairline is not landmarked
+  // — the oval's top arc runs along it, and hair crosses it differently every day.
+  hairline: 0.34,
+  // How far the oval is pulled inward before it bounds a cheek. The oval IS the silhouette, so a
+  // patch touching it is half background the moment the head turns a few degrees.
+  ovalInset: 0.16,
+  // Vertical band under the eye, measured down from the lower lid.
+  underEyeTop: 0.06,
+  underEyeBottom: 0.30,
+  // Gap between the under-eye band and the top of the cheek patch.
+  cheekTop: 0.36,
+};
+
+const dot = (px, py, ux, uy) => px * ux + py * uy;
+
+/**
+ * The face's own coordinate system: along the eye axis, and down the face.
+ *
+ * Both axes are in EYE-DISTANCE units, so every number expressed in this frame is free of how far
+ * away the phone was. `a` is positive toward the subject's left eye, `d` positive toward the chin.
+ */
+export function frame(lm) {
+  const a = alignment(lm);
+  if (!a) return null;
+  const ux = Math.cos(a.roll);
+  const uy = Math.sin(a.roll);
+  return { origin: a.eyeMid, ux, uy, dx: -uy, dy: ux, scale: a.scale, roll: a.roll };
+}
+
+/** Image point → frame coordinates. */
+export function project(p, f) {
+  const vx = p.x - f.origin.x;
+  const vy = p.y - f.origin.y;
+  return { a: dot(vx, vy, f.ux, f.uy) / f.scale, d: dot(vx, vy, f.dx, f.dy) / f.scale };
+}
+
+/** Frame coordinates → image point. */
+export function unproject(q, f) {
+  return {
+    x: f.origin.x + (f.ux * q.a + f.dx * q.d) * f.scale,
+    y: f.origin.y + (f.uy * q.a + f.dy * q.d) * f.scale,
+  };
+}
+
+/** Convex hull, monotone chain. Used for the rings the library does not give as a closed loop. */
+export function hull(pts) {
+  if (pts.length < 3) return [...pts];
+  const s = [...pts].sort((p, q) => (p.a - q.a) || (p.d - q.d));
+  const cross = (o, p, q) => (p.a - o.a) * (q.d - o.d) - (p.d - o.d) * (q.a - o.a);
+  const half = (src) => {
+    const out = [];
+    for (const p of src) {
+      while (out.length >= 2 && cross(out[out.length - 2], out[out.length - 1], p) <= 0) out.pop();
+      out.push(p);
+    }
+    out.pop();
+    return out;
+  };
+  return [...half(s), ...half([...s].reverse())];
+}
+
+/** Ray casting. Points on the boundary may fall either way; callers erode, so it does not matter. */
+export function inPolygon(a, d, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i, i += 1) {
+    const pi = poly[i];
+    const pj = poly[j];
+    if ((pi.d > d) !== (pj.d > d)
+      && a < ((pj.a - pi.a) * (d - pi.d)) / (pj.d - pi.d) + pi.a) inside = !inside;
+  }
+  return inside;
+}
+
+/** A named ring as frame-space points, hulled where the library did not hand us a closed loop. */
+function ring(lm, f, name) {
+  const spec = RINGS[name];
+  const pts = spec.vertices.map((i) => at(lm, i)).filter(Boolean);
+  if (pts.length !== spec.vertices.length) return null;
+  const proj = pts.map((p) => project(p, f));
+  return spec.hull ? hull(proj) : proj;
+}
+
+/** Push every vertex of a polygon toward its centroid by `t`. Shrinks, never reorders. */
+function shrink(poly, t) {
+  const ca = poly.reduce((s, p) => s + p.a, 0) / poly.length;
+  const cd = poly.reduce((s, p) => s + p.d, 0) / poly.length;
+  return poly.map((p) => ({ a: p.a + (ca - p.a) * t, d: p.d + (cd - p.d) * t }));
+}
+
+/** Grow a polygon away from its centroid by `t`. Exclusions are grown; regions never are. */
+const grow = (poly, t) => shrink(poly, -t);
+
+const minBy = (pts, key) => pts.reduce((b, p) => (key(p) < key(b) ? p : b));
+const maxBy = (pts, key) => pts.reduce((b, p) => (key(p) > key(b) ? p : b));
+
+/**
+ * The regions the pipeline measures inside, as polygons in frame coordinates.
+ *
+ * Returns null when any ring is missing a vertex, rather than a partial set — a region built from
+ * half a ring is not a noisier region, it is a different piece of face.
+ *
+ * `chin` is included and is flagged experimental by the caller, not here. Geometry has no opinion
+ * about whether a beard makes it unmeasurable; that is what the validation phase is for.
+ */
+export function anatomy(lm) {
+  const f = frame(lm);
+  if (!f) return null;
+
+  const oval = ring(lm, f, 'faceOval');
+  const lEye = ring(lm, f, 'leftEye');
+  const rEye = ring(lm, f, 'rightEye');
+  const lBrow = ring(lm, f, 'leftBrow');
+  const rBrow = ring(lm, f, 'rightBrow');
+  const lips = ring(lm, f, 'lips');
+  if (!oval || !lEye || !rEye || !lBrow || !rBrow || !lips) return null;
+
+  const brows = [...lBrow, ...rBrow];
+  const browTop = minBy(brows, (p) => p.d).d;
+  const ovalTop = minBy(oval, (p) => p.d).d;
+  const inner = shrink(oval, INSET.ovalInset);
+
+  // Forehead: bounded below by the brows themselves, above by the oval's forehead arc pulled down
+  // out of the hairline. Both boundaries are the mesh's; only the two fractions are ours.
+  const lift = (browTop - ovalTop) * INSET.hairline;
+  const foreheadTop = inner
+    .filter((p) => p.d < browTop)
+    .map((p) => ({ a: p.a, d: p.d + lift }))
+    .sort((p, q) => p.a - q.a);
+  const foreheadBottom = brows
+    .map((p) => ({ a: p.a, d: browTop - INSET.browClearance }))
+    .sort((p, q) => q.a - p.a);
+  const forehead = foreheadTop.length >= 2 ? [...foreheadTop, ...foreheadBottom] : null;
+
+  /** One side. `sign` is +1 for the subject's left, which is +a in the frame. */
+  const side = (eye, sign) => {
+    const lid = maxBy(eye, (p) => p.d).d;              // lower lid
+    const outer = maxBy(eye, (p) => p.a * sign).a;     // outer corner
+    const innerEye = minBy(eye, (p) => p.a * sign).a;  // inner corner
+    const lipCorner = maxBy(lips, (p) => p.a * sign);
+    const edge = (d) => {
+      // How far out the inset oval reaches at this height — the lateral bound of the cheek.
+      const near = inner.filter((p) => p.a * sign > 0);
+      if (!near.length) return outer;
+      return near.reduce((b, p) => (Math.abs(p.d - d) < Math.abs(b.d - d) ? p : b)).a;
+    };
+
+    const underEye = [
+      { a: innerEye, d: lid + INSET.underEyeTop },
+      { a: outer, d: lid + INSET.underEyeTop },
+      { a: outer, d: lid + INSET.underEyeBottom },
+      { a: innerEye, d: lid + INSET.underEyeBottom },
+    ];
+
+    const top = lid + INSET.cheekTop;
+    const bottom = lipCorner.d;
+    const cheek = [
+      { a: innerEye, d: top },
+      { a: edge(top), d: top },
+      { a: edge(bottom), d: bottom },
+      { a: lipCorner.a - sign * 0.10, d: bottom },
+    ];
+    return { underEye, cheek };
+  };
+
+  const left = side(lEye, 1);
+  const right = side(rEye, -1);
+
+  // Nose bridge: between the inner eye corners, above the lip line. Narrow, because the wings and
+  // nostrils are neither flat nor lit like the rest of the face.
+  const lInner = minBy(lEye, (p) => p.a).a;
+  const rInner = maxBy(rEye, (p) => p.a).a;
+  const lipTop = minBy(lips, (p) => p.d).d;
+  const eyeLine = Math.max(maxBy(lEye, (p) => p.d).d, maxBy(rEye, (p) => p.d).d);
+  const nose = [
+    { a: lInner * 0.55, d: eyeLine },
+    { a: rInner * 0.55, d: eyeLine },
+    { a: rInner * 0.40, d: (eyeLine + lipTop) / 2 },
+    { a: lInner * 0.40, d: (eyeLine + lipTop) / 2 },
+  ];
+
+  // Chin: between the lip ring and the inset oval's bottom. The region most exposed to facial hair,
+  // and the one the validation phase exists to accept or reject.
+  const lipBottom = maxBy(lips, (p) => p.d).d;
+  const ovalBottom = maxBy(inner, (p) => p.d).d;
+  const chinHalf = Math.abs(maxBy(lips, (p) => p.a).a - minBy(lips, (p) => p.a).a) * 0.30;
+  const chin = ovalBottom > lipBottom ? [
+    { a: -chinHalf, d: lipBottom + 0.08 },
+    { a: chinHalf, d: lipBottom + 0.08 },
+    { a: chinHalf * 0.8, d: ovalBottom },
+    { a: -chinHalf * 0.8, d: ovalBottom },
+  ] : null;
+
+  return {
+    frame: f,
+    // Clipped against, never measured: the silhouette.
+    bounds: inner,
+    regions: {
+      ...(forehead ? { forehead } : {}),
+      leftCheek: left.cheek,
+      rightCheek: right.cheek,
+      leftUnderEye: left.underEye,
+      rightUnderEye: right.underEye,
+      nose,
+      ...(chin ? { chin } : {}),
+    },
+    // Grown before subtraction. An eyelash or a lip edge inside a "skin" measurement is worth more
+    // than the skin it costs to keep them out.
+    exclusions: [
+      grow(lEye, 0.18), grow(rEye, 0.18),
+      grow(lBrow, 0.22), grow(rBrow, 0.22),
+      grow(lips, 0.15),
+    ],
   };
 }
 

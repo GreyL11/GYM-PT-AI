@@ -3,9 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node test_filter.mjs && node test_exercises.mjs && node test_planner.mjs && node test_insights.mjs && node test_coach.mjs && node test_nutrition.mjs && node test_boxing.mjs && node test_devcheck.mjs && node test_mind.mjs && node test_t_inputs.mjs && node test_skin.mjs && node test_face.mjs && node test_evidence.mjs && node test_validate.mjs && node test_digest.mjs",
+    "test": "node test_filter.mjs && node test_exercises.mjs && node test_planner.mjs && node test_insights.mjs && node test_coach.mjs && node test_nutrition.mjs && node test_boxing.mjs && node test_devcheck.mjs && node test_mind.mjs && node test_t_inputs.mjs && node test_skin.mjs && node test_face.mjs && node test_face_pipeline.mjs && node test_face_features.mjs && node test_face_validation.mjs && node test_face_protocol.mjs && node test_evidence.mjs && node test_validate.mjs && node test_digest.mjs",
     "serve": "node serve.mjs",
-    "vendor": "node vendor.mjs"
+    "vendor": "node vendor.mjs",
+    "topology": "node topology.mjs",
+    "eval:face": "node eval_face.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.1",

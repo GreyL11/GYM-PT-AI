@@ -19,19 +19,22 @@
        reads as wireframe. Depth comes from the steps between surfaces, not from outlines. */
     --bg: #0d0d0f;
     --sc-lowest: #101013;
-    --sc-low: #141418;
-    --sc: #17171b;
-    --sc-high: #1e1e23;
-    --sc-highest: #26262c;
-    --on-surface: #eceaf0;
-    --on-surface-variant: #8f8f9c;
-    --outline-variant: #2a2a31;
+    --sc-low: #1d1013;
+    --sc: #26181b;
+    --sc-high: #2a1c1f;
+    --sc-highest: #362629;
+    --on-surface: #f7dce1;
+    --on-surface-variant: #a8898f;
+    --outline-variant: #3b3235;   /* the ink_secondary hairline at 30% over the base */
     /* Two marks on near-black, taken from the icon: bone-white ink, one pink seal.
        The app was running hi-vis green, mint and rose while the icon was bone and pink — three
        palettes for one product. Sumi-e logic instead: the page is ink, and colour gets spent once,
        on the thing to do next. */
-    --neon: #ff4d8d;          /* the accent: actions, focus, the live rep count */
+    --neon: #ff4d8d;          /* kinetic: the live rep count, bar fills, the moving line */
     --on-neon: #1a0010;
+    /* Actions are the softer pink; the hot pink stays reserved for data that moves. */
+    --accent: #ffb1c4;
+    --on-accent: #5b0028;
     --danger: #c5020c;
     --on-danger: #ffdad6;
 
@@ -62,8 +65,8 @@
   /* Mono is for anything you read as an instrument: reps, weights, timers, angles. */
   .data { font: 700 13px/18px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
   /* Clamped: "Hi Jaswanth" must not wrap where "Hi Jo" fits fine. */
-  .hero { font: 900 clamp(30px, 10vw, 44px)/1.04 var(--sans); letter-spacing: -.035em; text-transform: uppercase; }
-  .headline { font: 800 26px/30px var(--sans); letter-spacing: -.02em; text-transform: uppercase; }
+  .hero { font: 900 clamp(32px, 12vw, 56px)/1.0 var(--sans); letter-spacing: -.05em; text-transform: uppercase; }
+  .headline { font: 800 26px/30px var(--sans); letter-spacing: -.04em; text-transform: uppercase; }
 
   #stage { position: fixed; inset: 0; }
   #cam, #overlay { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
@@ -81,12 +84,12 @@
   #exname { flex: 1; text-shadow: 0 2px 12px #000; }
   #setinfo {
     display: inline-block; margin-top: 8px; padding: 8px 14px;
-    background: #2a2a2acc; border: 1px solid var(--outline-variant); border-radius: 2px;
+    background: #2a2a2acc; border: 1px solid var(--outline-variant); border-radius: 0;
     backdrop-filter: blur(4px); color: var(--neon);
   }
   #btn-settings {
     height: var(--touch); padding: 0 22px; background: transparent;
-    border: 2px solid var(--neon); color: var(--neon); border-radius: 2px;
+    border: 2px solid var(--neon); color: var(--neon); border-radius: 0;
   }
 
   #reps {
@@ -95,12 +98,11 @@
   }
   #repnum {
     font: 900 84px/80px var(--mono); color: var(--neon); font-variant-numeric: tabular-nums;
-    text-shadow: 0 0 15px rgba(255, 77, 141, .45);
   }
   #reptarget { margin-top: 8px; color: var(--on-surface-variant); letter-spacing: .18em; }
 
   #cue {
-    margin: auto var(--margin) 0; padding: 18px; border-radius: 14px;
+    margin: auto var(--margin) 0; padding: 18px; border-radius: 0;
     background: var(--danger); color: #fff; font-weight: 800; font-size: 22px; line-height: 28px;
     text-align: center; opacity: 0; transition: opacity .18s;
   }
@@ -118,19 +120,16 @@
 
   /* ── buttons ─────────────────────────────────────────────────────────────────────────── */
   button {
-    flex: 0 0 auto; min-height: 54px; padding: 0 18px; border-radius: 12px;
-    background: var(--sc-high); color: var(--on-surface);
-    border: 1px solid var(--outline-variant);
+    /* Secondary is transparent with a hairline — solid fill now means "this is the action". */
+    flex: 0 0 auto; min-height: var(--touch); padding: 0 18px; border-radius: 0;
+    background: transparent; color: var(--on-surface);
+    border: 1px solid var(--on-surface-variant);
     font: 700 14px/18px var(--mono); letter-spacing: .06em; text-transform: uppercase;
-    transition: transform .1s, box-shadow .1s;
+    transition: transform .1s;
   }
   button:active { transform: scale(.97); }
-  button.primary {
-    background: var(--neon); color: var(--on-neon); border-color: var(--neon);
-    box-shadow: 0 0 22px -4px color-mix(in srgb, var(--neon) 65%, transparent);
-  }
-  button.primary:active { box-shadow: none; }
-  button:disabled { opacity: .4; box-shadow: none; }
+  button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+  button:disabled { opacity: .4; }
   #bottom button { flex: 1; }
 
   /* ── sheets ──────────────────────────────────────────────────────────────────────────── */
@@ -149,7 +148,7 @@
     font: 900 22px/26px var(--sans); font-style: italic; letter-spacing: -.04em;
     text-transform: uppercase; color: var(--on-surface);
   }
-  .sheet header button { min-height: 44px; padding: 0 10px; background: none; color: var(--neon); }
+  .sheet header button { min-height: 44px; padding: 0 10px; background: none; border: none; color: var(--accent); }
   .sheet .body {
     flex: 1; overflow-y: auto; padding: var(--stack) var(--margin);
     display: flex; flex-direction: column; gap: var(--stack);
@@ -167,13 +166,13 @@
      as one more filter alongside the ones underneath it. */
   #disciplines {
     flex: 0 0 auto; display: flex; gap: 6px; margin: 14px var(--margin) 0; padding: 4px;
-    background: var(--sc-highest); border-radius: 10px;
+    background: var(--sc-highest); border-radius: 0;
   }
   #disciplines button {
-    flex: 1; min-height: 52px; padding: 0 12px; border-radius: 7px; background: none;
+    flex: 1; min-height: 52px; padding: 0 12px; border-radius: 0; background: none;
     color: var(--on-surface-variant); white-space: nowrap;
   }
-  #disciplines button[aria-pressed="true"] { background: var(--neon); color: var(--on-neon); }
+  #disciplines button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
   #disciplines:has(button:only-child) { display: none; }
 
   #groups {
@@ -183,7 +182,7 @@
   #groups[hidden] { display: none; }
   #groups::-webkit-scrollbar { display: none; }
   #groups button {
-    min-height: 48px; padding: 0 16px; border-radius: 999px; background: transparent;
+    min-height: 48px; padding: 0 16px; border-radius: 0; background: transparent;
     border: 1px solid var(--outline-variant); color: var(--on-surface-variant);
     font-size: 14px; white-space: nowrap;
   }
@@ -195,7 +194,7 @@
   #exlist button, .exlist button {
     display: flex; align-items: center; justify-content: space-between; gap: 12px;
     width: 100%; min-height: 58px; padding: 10px 14px; text-align: left;
-    background: var(--sc-low); border: 1px solid var(--outline-variant); border-radius: 12px;
+    background: var(--sc-low); border: 1px solid var(--outline-variant); border-radius: 0;
   }
   #exlist button:active, .exlist button:active { border-color: var(--outline-variant); }
   #exlist .nm, .exlist .nm { font: 600 16px/22px var(--sans); text-transform: none; letter-spacing: 0; }
@@ -217,7 +216,7 @@
     font: 700 12px/16px var(--mono); text-transform: uppercase; letter-spacing: .14em;
   }
   .chips.wrap button {
-    min-height: 48px; padding: 0 14px; border-radius: 12px; background: var(--sc-lowest);
+    min-height: 48px; padding: 0 14px; border-radius: 0; background: var(--sc-lowest);
     border: 1px solid var(--outline-variant); color: var(--on-surface-variant);
     font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
@@ -229,9 +228,9 @@
      neon meaning exactly one thing: the action. */
   .chips.wrap button[aria-pressed="true"],
   #groups button[aria-pressed="true"] {
-    background: color-mix(in srgb, var(--neon) 13%, transparent);
-    border-color: color-mix(in srgb, var(--neon) 55%, transparent);
-    color: var(--neon);
+    background: color-mix(in srgb, var(--accent) 13%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+    color: var(--accent);
   }
 
   #picker-controls {
@@ -240,45 +239,45 @@
     border-top: 1px solid var(--outline-variant); background: var(--sc);
   }
   /* segmented camera control */
-  #facing { display: flex; height: var(--touch); background: var(--sc-lowest); border: 1px solid #2f2f2e; border-radius: 12px; padding: 4px; }
+  #facing { display: flex; height: var(--touch); background: var(--sc-lowest); border: 1px solid #2f2f2e; border-radius: 0; padding: 4px; }
   /* Segments, not buttons: the raised base style would make each half look like its own control. */
   #facing button {
     flex: 1; min-width: 0; min-height: auto; padding: 0 8px; background: none; border: none;
-    color: var(--on-surface-variant); border-radius: 9px; font-size: 14px; white-space: nowrap;
+    color: var(--on-surface-variant); border-radius: 0; font-size: 14px; white-space: nowrap;
   }
   /* The segmented control keeps a solid fill: it is one of two, and a tint reads as ambiguous
      when the alternative sits right beside it. */
-  #facing button[aria-pressed="true"] { background: var(--sc-highest); color: var(--neon); }
+  #facing button[aria-pressed="true"] { background: var(--sc-highest); color: var(--accent); }
 
   /* voice switch — a real checkbox, restyled, so the label and keyboard still work */
   .switch {
     display: flex; align-items: center; justify-content: space-between; height: var(--touch);
-    padding: 0 18px; border: 1px solid var(--outline-variant); border-radius: 8px; background: var(--sc);
+    padding: 0 18px; border: 1px solid var(--outline-variant); border-radius: 0; background: var(--sc);
   }
   .switch span { font: 700 16px/20px var(--mono); letter-spacing: .05em; text-transform: uppercase; }
-  .switch input { appearance: none; margin: 0; width: 72px; height: 40px; border-radius: 999px;
+  .switch input { appearance: none; margin: 0; width: 72px; height: 40px; border-radius: 0;
     background: var(--sc-highest); position: relative; transition: background .15s; }
-  .switch input:checked { background: #3a1024; box-shadow: 0 0 20px rgba(255, 77, 141, .25); }
+  .switch input:checked { background: #3a1024; }
   .switch input::after {
     content: ''; position: absolute; top: 4px; left: 4px; width: 32px; height: 32px;
-    border-radius: 999px; background: var(--sc-bright, #6b6b6b); transition: transform .15s, background .15s;
+    border-radius: 0; background: var(--sc-bright, #6b6b6b); transition: transform .15s, background .15s;
   }
   .switch input:checked::after { background: var(--neon); transform: translateX(32px); }
 
   /* ── setup ───────────────────────────────────────────────────────────────────────────── */
   .hintcard {
     display: flex; gap: 12px; padding: 16px; background: var(--sc-high);
-    border: 1px solid var(--outline-variant); border-radius: 2px; color: var(--on-surface-variant);
+    border: 1px solid var(--outline-variant); border-radius: 0; color: var(--on-surface-variant);
     font: 700 14px/20px var(--mono); letter-spacing: .03em;
   }
   /* The number is the content; the frame around it was most of the ink. One surface, one border,
      the label in the same quiet mono as every other section label. */
-  .stepper { background: var(--sc); border: 1px solid var(--outline-variant); border-radius: 16px; padding: 14px; }
+  .stepper { background: var(--sc); border: 1px solid var(--outline-variant); border-radius: 0; padding: 14px; }
   .stepper > label {
     display: block; padding: 0 2px 10px; color: var(--on-surface-variant);
     font: 700 12px/16px var(--mono); text-transform: uppercase; letter-spacing: .14em;
   }
-  .stepper .ctl { display: flex; align-items: stretch; height: 64px; background: var(--sc-lowest); border-radius: 12px; }
+  .stepper .ctl { display: flex; align-items: stretch; height: 64px; background: var(--sc-lowest); border-radius: 0; }
   .stepper .ctl button {
     width: 64px; min-height: auto; background: none; border: none; color: var(--on-surface-variant);
     font: 500 26px/1 var(--mono);
@@ -298,15 +297,14 @@
   #sheet-rest .body { align-items: center; justify-content: center; text-align: center; }
   #resttime {
     font: 900 84px/80px var(--mono); color: var(--neon); font-variant-numeric: tabular-nums;
-    text-shadow: 0 0 24px rgba(255, 77, 141, .35);
   }
-  #restbar { width: 200px; height: 12px; background: var(--sc-highest); border-radius: 999px; overflow: hidden; }
+  #restbar { width: 200px; height: 12px; background: var(--sc-highest); border-radius: 0; overflow: hidden; }
   #restfill { height: 100%; width: 100%; background: var(--neon); transition: width 1s linear; }
 
   /* framing / calibration overlay — centred, never over the lifter's body region */
   #bigmsg {
     margin: 0 var(--margin); padding: 20px; text-align: center;
-    background: #0d0d0fd9; border: 1px solid var(--outline-variant); border-radius: 16px;
+    background: #0d0d0fd9; border: 1px solid var(--outline-variant); border-radius: 0;
     backdrop-filter: blur(6px);
   }
   #bigmsg[hidden] { display: none; }
@@ -320,12 +318,23 @@
 
   /* ── progress ────────────────────────────────────────────────────────────────────────── */
   .card {
-    background: var(--sc); border: 1px solid var(--outline-variant);
-    border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 12px;
-    box-shadow: 0 1px 0 rgba(255,255,255,.04) inset, 0 10px 30px rgba(0,0,0,.5);
+    background: var(--sc-lowest); border: none;
+    border-radius: 0; padding: 20px 16px; display: flex; flex-direction: column; gap: 12px;
   }
-  .card h2 { margin: 0; font: 800 18px/22px var(--sans); text-transform: uppercase; letter-spacing: -.01em; }
-  .card .line { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .card h2 {
+    margin: 0 0 4px; padding-bottom: 8px; border-bottom: 1px solid var(--outline-variant);
+    color: var(--on-surface-variant);
+    font: 700 12px/16px var(--mono); letter-spacing: .15em; text-transform: uppercase;
+  }
+  .card h2.name {
+    color: var(--on-surface); font: 700 16px/24px var(--sans); letter-spacing: 0;
+  }
+  /* A data strip: name left, instrument right, ruled off from the next one. */
+  .card .line {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+    padding-bottom: 10px; border-bottom: 1px solid var(--outline-variant);
+  }
+  .card .line:last-child { padding-bottom: 0; border-bottom: none; }
   .card .k { color: var(--on-surface-variant); font: 700 13px/18px var(--mono); letter-spacing: .05em; text-transform: uppercase; }
   .card .v { font: 700 18px/22px var(--mono); font-variant-numeric: tabular-nums; }
   .up { color: var(--neon); }
@@ -334,7 +343,7 @@
 
   .bar { display: flex; align-items: center; gap: 12px; }
   .bar .name { width: 92px; flex: 0 0 auto; font: 700 13px/18px var(--mono); text-transform: uppercase; color: var(--on-surface-variant); }
-  .bar .track { flex: 1; height: 12px; background: var(--sc-highest); border-radius: 999px; overflow: hidden; position: relative; }
+  .bar .track { flex: 1; height: 4px; background: var(--sc-highest); border-radius: 0; overflow: hidden; position: relative; }
   .bar .fill { height: 100%; background: var(--neon); }
   .bar .fill.under { background: #6b6b6b; }
   .bar .fill.over { background: #ffb4ab; }
@@ -344,29 +353,28 @@
   #sliders { display: flex; flex-direction: column; gap: var(--stack); }
   .slider {
     background: var(--sc); border: 1px solid var(--outline-variant);
-    border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 12px;
-    box-shadow: 0 1px 0 rgba(255,255,255,.04) inset, 0 10px 30px rgba(0,0,0,.5);
+    border-radius: 0; padding: 16px; display: flex; flex-direction: column; gap: 12px;
   }
   .slider .head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .slider label { font: 500 14px/20px var(--sans); text-transform: uppercase; letter-spacing: .04em; }
   .slider output {
     min-width: 84px; text-align: center; padding: 8px 12px; background: var(--sc-lowest);
-    border: 1px solid var(--outline-variant); border-radius: 999px; color: var(--neon);
+    border: 1px solid var(--outline-variant); border-radius: 0; color: var(--neon);
     font: 700 16px/20px var(--mono); font-variant-numeric: tabular-nums;
   }
-  input[type=range] { appearance: none; width: 100%; height: 12px; border-radius: 999px; background: var(--sc-highest); }
+  input[type=range] { appearance: none; width: 100%; height: 12px; border-radius: 0; background: var(--sc-highest); }
   input[type=range]::-webkit-slider-thumb {
-    appearance: none; width: 32px; height: 32px; border-radius: 999px; background: var(--neon);
+    appearance: none; width: 32px; height: 32px; border-radius: 0; background: var(--neon);
     border: 4px solid var(--bg);
   }
   input[type=range]::-moz-range-thumb {
-    width: 32px; height: 32px; border: 4px solid var(--bg); border-radius: 999px; background: var(--neon);
+    width: 32px; height: 32px; border: 4px solid var(--bg); border-radius: 0; background: var(--neon);
   }
   .row { display: flex; align-items: center; gap: 12px; }
   .row label { flex: 1; font: 500 17px/22px var(--sans); text-transform: uppercase; letter-spacing: .04em; }
   select {
     min-height: 52px; padding: 0 14px; background: var(--sc-high); color: var(--on-surface);
-    border: 1px solid var(--outline-variant); border-radius: 2px;
+    border: 1px solid var(--outline-variant); border-radius: 0;
     font: 700 15px/20px var(--mono); text-transform: uppercase;
   }
   .err { color: #ff8a80; margin: 0; font: 700 14px/20px var(--mono); }
@@ -382,14 +390,14 @@
     background: linear-gradient(transparent, #0d0d0fe6 55%); text-align: center;
   }
   #face-guide { margin: 0 0 10px; font: 700 18px/24px var(--sans); }
-  #face-bar { height: 4px; background: #ffffff22; border-radius: 999px; overflow: hidden; }
+  #face-bar { height: 4px; background: #ffffff22; border-radius: 0; overflow: hidden; }
   #face-progress { height: 100%; width: 0; background: var(--eat); transition: width .12s linear; }
   #face-state { margin-top: 8px; }
 
   /* devcheck: deliberately unstyled beyond legibility — a text dump, not a product screen */
   #devcheck-out {
     background: var(--sc-lowest); color: var(--on-surface); border: 1px solid var(--outline-variant);
-    border-radius: 2px; padding: 14px; font: 400 12px/17px var(--mono);
+    border-radius: 0; padding: 14px; font: 400 12px/17px var(--mono);
     white-space: pre-wrap; word-break: break-word; overflow-y: auto;
   }
 
@@ -397,7 +405,7 @@
      instrument text on the screen after the weight itself. */
   .plateline {
     margin: 0; padding: 14px 16px; background: var(--sc); border: 1px solid var(--outline-variant);
-    border-left: 3px solid var(--neon); border-radius: 12px;
+    border-left: 3px solid var(--neon); border-radius: 0;
     font: 700 15px/22px var(--mono); letter-spacing: .04em; text-transform: uppercase;
   }
   .plateline[hidden] { display: none; }
@@ -406,7 +414,16 @@
   /* ── dashboard ───────────────────────────────────────────────────────────────────────── */
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gutter); }
   .grid2 > .card { padding: 14px; gap: 8px; min-width: 0; }
-  .cardlabel { font: 700 13px/18px var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+  .cardlabel { font: 700 12px/16px var(--mono); letter-spacing: .15em; text-transform: uppercase; }
+  /* "TODAY'S PLAN", "KEY LIFTS", "28 DAY TREND": a label-caps heading sitting on a hairline. */
+  .sectionlabel {
+    margin: 0 0 16px; padding-bottom: 8px; border-bottom: 1px solid var(--outline-variant);
+    color: var(--on-surface-variant);
+    font: 700 12px/16px var(--mono); letter-spacing: .15em; text-transform: uppercase;
+  }
+  .section { background: var(--sc-lowest); padding: 20px 16px; }
+  /* A rest day has no running order; an empty ruled box is worse than no box. */
+  .section:has(> .lifts:empty) { display: none; }
 
   /* Half a phone wide is not much. Everything in these cards is one line or it is wrong: a
      wrapped "2,830 kcal" reads as two numbers. */
@@ -444,15 +461,9 @@
   .card .big .of { color: var(--on-surface-variant); font: 700 15px/20px var(--mono); letter-spacing: 0; }
   /* The two buttons that matter glow in their own colour, so the thing to do next is the
      brightest thing on the screen. */
-  button.train {
-    background: var(--train); color: var(--on-train); border-color: var(--train); border-radius: 10px;
-    box-shadow: 0 0 22px -4px color-mix(in srgb, var(--train) 70%, transparent);
-  }
-  button.eat {
-    background: var(--eat); color: var(--on-eat); border-color: var(--eat); border-radius: 10px;
-    box-shadow: 0 0 22px -4px color-mix(in srgb, var(--eat) 70%, transparent);
-  }
-  button.train:active, button.eat:active { box-shadow: none; transform: translateY(1px); }
+  button.train { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+  button.eat { background: var(--eat); color: var(--on-eat); border-color: var(--eat); }
+  button.train:active, button.eat:active { transform: translateY(1px); }
 
   /* Meal slots: ticked when something was logged in that part of the day. */
   .slots { display: flex; flex-direction: column; gap: 6px; }
@@ -475,8 +486,8 @@
   .daymark span:first-child { color: var(--train); }
   .daymark span:last-child { color: var(--on-surface-variant); }
   .session {
-    margin: 10px 0 0; font: 900 clamp(38px, 13vw, 60px)/0.94 var(--sans);
-    letter-spacing: -.045em; text-transform: uppercase;
+    margin: 10px 0 0; font: 900 clamp(38px, 14vw, 64px)/0.94 var(--sans);
+    letter-spacing: -.05em; text-transform: uppercase;
   }
   .sessionmeta {
     margin-top: 10px; color: var(--on-surface-variant);
@@ -486,7 +497,7 @@
 
   /* The running order. Numbered because the order is the plan, and ruled because a stack of tiles
      is six more boxes than this needs. */
-  .lifts { display: flex; flex-direction: column; border-top: 1px solid var(--outline-variant); }
+  .lifts { display: flex; flex-direction: column; }
   .lifts button {
     display: flex; align-items: baseline; gap: 14px; width: 100%; padding: 16px 2px;
     background: none; border: none; border-bottom: 1px solid var(--outline-variant);
@@ -496,37 +507,44 @@
     flex: 0 0 auto; width: 22px; color: var(--on-surface-variant);
     font: 700 12px/20px var(--mono); font-variant-numeric: tabular-nums;
   }
+  .lifts .no:empty { display: none; }
   .lifts .nm {
     flex: 1; min-width: 0; font: 600 17px/22px var(--sans); text-transform: none; letter-spacing: 0;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .lifts .meta {
-    flex: 0 0 auto; color: var(--on-surface-variant);
-    font: 700 12px/20px var(--mono); font-variant-numeric: tabular-nums;
+    flex: 0 0 auto; display: flex; align-items: baseline; gap: 8px; color: var(--on-surface);
+    font: 500 18px/24px var(--mono); letter-spacing: .1em; font-variant-numeric: tabular-nums;
   }
+  .lifts .meta .u {
+    color: var(--on-surface-variant); font: 700 12px/16px var(--mono); letter-spacing: .15em;
+    text-transform: uppercase;
+  }
+  .lifts button:last-child { border-bottom: none; }
   .lifts button.done .nm { color: var(--on-surface-variant); text-decoration: line-through; }
   .lifts button.done .no { color: var(--eat); }
   .lifts button.done .meta { color: var(--eat); }
 
   /* A spec row: figures under a rule, no boxes. */
   .readout {
-    display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px;
-    margin-top: 26px; border-top: 1px solid var(--outline-variant); padding-top: 16px;
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--gutter);
+    margin-top: 26px; padding: 20px 16px; background: var(--sc-lowest);
   }
   .readout > button {
-    display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
-    min-width: 0; min-height: 0; padding: 0 10px 0 0; text-align: left;
+    display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+    min-width: 0; min-height: 0; padding: 0; text-align: left;
     background: none; border: none; border-radius: 0;
   }
-  .readout .k { font: 700 10px/14px var(--mono); letter-spacing: .12em; text-transform: uppercase;
+  .readout .k { font: 700 11px/16px var(--mono); letter-spacing: .15em; text-transform: uppercase;
                 color: var(--on-surface-variant); }
-  .readout .v { font: 800 22px/26px var(--sans); letter-spacing: -.02em; color: var(--on-surface);
-                text-transform: none; }
-  .readout .v small { display: block; font: 700 10px/14px var(--mono); color: var(--on-surface-variant); }
+  .readout .v { font: 500 18px/24px var(--mono); letter-spacing: .06em; color: var(--on-surface);
+                text-transform: none; font-variant-numeric: tabular-nums; }
+  .readout .v small { display: block; font: 700 11px/16px var(--mono); letter-spacing: .1em;
+                      color: var(--on-surface-variant); }
   .readout .sub { font: 700 10px/14px var(--mono); color: var(--on-surface-variant);
                   text-transform: uppercase; letter-spacing: .06em; }
   .readout .bar { width: 100%; }
-  .readout .bar .track { display: block; width: 100%; height: 3px; }
+  .readout .bar .track { display: block; width: 100%; height: 4px; }
   .readout .spark { height: 18px; }
 
   #sheet-today #coach-card { margin-top: 26px; }
@@ -537,7 +555,7 @@
   .strip > button {
     display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start;
     gap: 3px; min-width: 0; min-height: 76px; padding: 10px 12px; text-align: left;
-    background: var(--sc); border: 1px solid var(--outline-variant); border-radius: 14px;
+    background: var(--sc); border: 1px solid var(--outline-variant); border-radius: 0;
   }
   .strip .k { font: 700 10px/14px var(--mono); letter-spacing: .12em; text-transform: uppercase;
               color: var(--on-surface-variant); }
@@ -562,10 +580,16 @@
   #coach-chart .kcal { fill: none; stroke: var(--eat); stroke-width: 2; stroke-dasharray: 3 4; }
   #coach-chart .dot { fill: var(--train); }
   #coach-chart .target { stroke: color-mix(in srgb, var(--eat) 45%, transparent); stroke-width: 1; stroke-dasharray: 2 5; }
-  .legend { display: flex; gap: 16px; flex-wrap: wrap; }
+  /* Legend sits at the top right of the plot, and the range is called out under it. */
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; justify-content: flex-end; margin-bottom: -8px; }
+  .instrument { font: 500 18px/24px var(--mono); letter-spacing: .1em; font-variant-numeric: tabular-nums; }
+  .axis {
+    display: flex; justify-content: space-between; color: var(--on-surface-variant);
+    font: 700 11px/16px var(--mono); letter-spacing: .15em; text-transform: uppercase;
+  }
   .legend span { display: flex; align-items: center; gap: 6px; font: 700 11px/16px var(--mono);
                  letter-spacing: .08em; text-transform: uppercase; color: var(--on-surface-variant); }
-  .legend i { width: 14px; height: 3px; border-radius: 2px; }
+  .legend i { width: 12px; height: 2px; border-radius: 0; }
   .coachline { color: var(--on-surface); font: 500 15px/22px var(--sans); margin: 0; }
   .suggest {
     border-top: 1px solid var(--sc-high); padding-top: 12px; display: flex;
@@ -593,7 +617,7 @@
   /* The home bar has no current-tab state — it only exists on the home screen, so none of them is
      ever "on". Mind's own sub-tabs are a different case: you stay on that sheet and move between
      three views, so there it has to show which one you are looking at. */
-  .tabs button.on { border-top-color: var(--train); color: var(--on-surface); }
+  .tabs button.on { border-top-color: var(--accent); color: var(--accent); }
 
   /* ── mind ────────────────────────────────────────────────────────────────────────────── */
   /* `.sheet .body` sets display:flex, which outranks the browser's own [hidden]{display:none} —
@@ -604,25 +628,30 @@
      thumb while the transcript moves behind it, so the scrolling is handed to #mind-scroll. */
   #mind-panel-talk { overflow: hidden; }
   #mind-scroll { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
-  .msg { max-width: 88%; padding: 11px 15px; border-radius: 18px; white-space: pre-wrap; font: 400 16px/23px var(--sans); }
-  .msg.user { align-self: flex-end; background: var(--neon); color: var(--on-neon); border-bottom-right-radius: 4px; }
-  .msg.assistant { align-self: flex-start; background: var(--sc-high); border-bottom-left-radius: 4px; }
+  /* …but with no key saved there is no composer to pin (renderTalk hides it) and the setup card is
+     a screenful of prose, so nothing was scrollable and the text below the fold was unreachable.
+     In that state the panel goes back to being an ordinary scrolling page. */
+  #mind-panel-talk:has(#mind-setup:not([hidden])) { overflow-y: auto; }
+  #mind-panel-talk:has(#mind-setup:not([hidden])) #mind-scroll { flex: 0 0 auto; overflow: visible; }
+  .msg { max-width: 85%; padding: 16px 18px; border-radius: 0; white-space: pre-wrap; font: 400 16px/24px var(--sans); }
+  .msg.user { align-self: flex-end; background: var(--accent); color: var(--on-accent); }
+  .msg.assistant { align-self: flex-start; background: var(--sc-high); border-left: 2px solid var(--sc-highest); }
   .msg.error { align-self: center; background: none; color: var(--on-surface-variant); font-size: 14px; text-align: center; }
 
   #mind-composer { display: flex; gap: 10px; align-items: flex-end; width: 100%; }
   #mind-input {
-    flex: 1; resize: none; max-height: 120px; padding: 12px 14px; border-radius: 20px;
+    flex: 1; resize: none; max-height: 120px; padding: 12px 14px; border-radius: 0;
     background: var(--sc-high); color: var(--on-surface); border: 1px solid var(--outline-variant);
     font: 400 16px/22px var(--sans);
   }
   #mind-input:focus { outline: none; border-color: var(--neon); }
-  #mind-send { min-height: 48px; border-radius: 20px; flex: 0 0 auto; }
+  #mind-send { min-height: 48px; border-radius: 0; flex: 0 0 auto; }
   .crisis { color: var(--on-surface-variant); font: 400 12px/16px var(--sans); text-align: center; margin: 8px 0 0; }
   .crisis a { color: inherit; }
 
   .moods { display: flex; gap: 6px; }
   .moods button { flex: 1; min-height: 52px; padding: 0; font-size: 22px; }
-  .moods button.on { background: var(--neon); border-color: var(--neon); }
+  .moods button.on { background: var(--accent); border-color: var(--accent); }
 
   /* Wraps rather than overflows: a datetime-local is far wider than the time input this row was
      built for, and two of them side by side push the second one off a phone screen. */
@@ -631,7 +660,7 @@
   .whenrow input { width: 100%; box-sizing: border-box; }
   input[type=time] {
     width: 100%; margin-top: 6px; min-height: 48px; padding: 0 12px; background: var(--sc-high);
-    color: var(--on-surface); border: 1px solid var(--outline-variant); border-radius: 2px;
+    color: var(--on-surface); border: 1px solid var(--outline-variant); border-radius: 0;
     font: 500 16px/22px var(--sans);
   }
 
@@ -654,21 +683,21 @@
   .q p { margin: 0 0 10px; font: 400 16px/23px var(--sans); }
   .q .opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .q .opts button { min-height: 46px; padding: 0 8px; font-size: 11px; }
-  .q .opts button.on { background: var(--neon); border-color: var(--neon); color: var(--on-neon); }
+  .q .opts button.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
   #mind-risk {
-    background: #3a0a16; border: 1px solid var(--neon); border-radius: 16px; padding: 16px; margin-bottom: 20px;
+    background: #3a0a16; border: 1px solid var(--neon); border-radius: 0; padding: 16px; margin-bottom: 20px;
   }
   #mind-risk strong { display: block; margin-bottom: 8px; font-size: 17px; }
   #mind-risk a { color: var(--neon); }
 
   input[type=text] {
     width: 100%; min-height: 52px; padding: 0 14px; background: var(--sc-high); color: var(--on-surface);
-    border: 1px solid var(--outline-variant); border-radius: 2px; font: 500 17px/22px var(--sans);
+    border: 1px solid var(--outline-variant); border-radius: 0; font: 500 17px/22px var(--sans);
   }
   input[type=text]:focus, textarea:focus { outline: none; border-color: var(--neon); }
   textarea {
     width: 100%; padding: 12px 14px; background: var(--sc-high); color: var(--on-surface);
-    border: 1px solid var(--outline-variant); border-radius: 12px; resize: vertical;
+    border: 1px solid var(--outline-variant); border-radius: 0; resize: vertical;
     font: 500 14px/20px var(--mono);
   }
   .howto-step p { margin: 4px 0 0; font: 500 16px/23px var(--sans); }
@@ -703,12 +732,12 @@
   /* `.exlist button` is width:100%, which inside a flex row makes every button eat the whole row.
      These need an explicit width to sit next to each other. */
   .foodrow > button {
-    flex: 0 0 auto; width: 46px; min-height: 46px; padding: 0; border-radius: 10px;
+    flex: 0 0 auto; width: 46px; min-height: 46px; padding: 0; border-radius: 0;
     justify-content: center; border-bottom: none;
   }
   .foodrow.logged {
     padding: 8px 8px 8px 14px; background: var(--sc-lowest);
-    border: 1px solid #2a2a29; border-radius: 12px;
+    border: 1px solid #2a2a29; border-radius: 0;
   }
   .foodrow.logged > button { color: var(--on-surface-variant); font-size: 22px; background: none; border-color: transparent; }
   #eatlist .foodrow > button:first-child { flex: 1; width: auto; text-align: left; padding: 10px 12px; justify-content: flex-start; }
@@ -799,7 +828,10 @@
         <button id="btn-start-today" class="train wide">Start</button>
       </div>
 
-      <div id="todaylist" class="lifts"></div>
+      <div class="section">
+        <h2 class="sectionlabel">Today's plan</h2>
+        <div id="todaylist" class="lifts"></div>
+      </div>
       <p id="today-note" class="muted data"></p>
 
       <!-- Readouts, not cards: a row of figures under a rule, the way a spec sheet lists them. -->
@@ -850,7 +882,9 @@
     <header>
       <button id="btn-face-back" type="button">&larr;</button>
       <div class="brand" style="flex:1;text-align:center;font-size:24px">Face</div>
-      <div style="width:44px"></div>
+      <!-- Same convention as the Progress sheet's "Data" button: a small, plainly-labelled
+           developer entry point rather than a second configuration system. -->
+      <button id="face-lab-toggle" type="button" style="font-size:11px" title="Developer: empirical validation mode">Validate</button>
     </header>
     <div class="body" style="padding:0;gap:0">
       <div id="face-stage">
@@ -863,9 +897,107 @@
         </div>
       </div>
       <div style="padding:var(--stack) var(--margin);display:flex;flex-direction:column;gap:12px">
-        <p class="muted">Face the camera in even light and hold still. Nothing is recorded — the
-          picture is measured on this phone and thrown away. Only numbers are kept.</p>
+        <!-- The honest state of this feature, said plainly rather than dressed up as a result.
+             Nothing here has been validated on real captures yet, so nothing here says anything
+             about anyone's skin. -->
+        <div class="card">
+          <span class="cardlabel">What this is doing</span>
+          <p class="coachline">Measuring how consistently the camera can see your face. It is not
+            reading your skin, and it will not, until the measurements have been shown to hold still
+            across many check-ins.</p>
+          <p class="muted data">Building your personal baseline · appearance signals still being validated</p>
+        </div>
+        <p class="muted">Face the camera in even light and hold still. The picture is measured on
+          this phone and thrown away — only numbers are kept, and no image is ever sent anywhere.</p>
         <p class="muted data" id="face-privacy"></p>
+      </div>
+
+      <!-- Not a product screen. Everything below collects and inspects the evidence that decides
+           which signals are ever allowed to become intelligence.
+
+           The two statuses are kept in separate cards, behind separate buttons, in separate
+           vocabularies. A protocol reading COMPLETE means photographs were taken. A signal reading
+           VALIDATED means a measurement survived them. Letting those two greens sit in one column
+           would be the most misleading thing this feature could do. -->
+      <div id="face-lab" class="body" hidden style="padding:0 var(--margin) var(--stack)">
+        <div class="card">
+          <span class="cardlabel" style="color:var(--train)">Face intelligence validation</span>
+          <p class="muted">Collecting evidence about whether these measurements are reliable enough
+            to mean anything. Nothing on this screen is a statement about your skin, and nothing here
+            is shown in the normal app.</p>
+        </div>
+
+        <div class="card">
+          <span class="cardlabel">Protocol collection status</span>
+          <pre id="face-dashboard" class="data" style="white-space:pre;overflow-x:auto;margin:0;font-size:11px;line-height:16px"></pre>
+        </div>
+
+        <div class="card">
+          <span class="cardlabel">Collect</span>
+          <select id="face-protocol">
+            <option value="A">A · same-session repeatability</option>
+            <option value="B">B · multi-day comparability</option>
+            <option value="C">C · lighting stress</option>
+            <option value="D">D · geometry stress</option>
+            <option value="E">E · occlusion stress</option>
+            <option value="F">F · facial hair / shaving</option>
+          </select>
+          <p class="coachline" id="face-purpose" style="margin-top:10px"></p>
+          <p class="muted" id="face-instruction"></p>
+          <label class="fieldlabel" id="face-na-row" hidden style="display:flex;gap:8px;align-items:center">
+            <input type="checkbox" id="face-na">
+            <span>Not applicable to me</span>
+          </label>
+          <label class="fieldlabel" style="margin-top:10px">Condition for the next capture</label>
+          <select id="face-condition"></select>
+          <pre id="face-progress-text" class="data" style="white-space:pre-wrap;margin:10px 0 0;font-size:11px;line-height:16px"></pre>
+          <button id="face-session" type="button" style="margin-top:10px">Start capture session</button>
+          <p class="muted data" id="face-session-state"></p>
+        </div>
+
+        <div class="card">
+          <span class="cardlabel">Last capture</span>
+          <pre id="face-lab-out" class="data" style="white-space:pre;overflow-x:auto;margin:0;font-size:11px;line-height:16px"></pre>
+        </div>
+
+        <div class="card">
+          <span class="cardlabel">Signal validation status</span>
+          <p class="muted">A separate question, with a separate answer. Completing a protocol does
+            not validate anything.</p>
+          <button id="face-validate" type="button">Evaluate signals</button>
+          <pre id="face-validation-out" class="data" style="white-space:pre-wrap;margin:10px 0 0;font-size:11px;line-height:16px">Not run yet.</pre>
+        </div>
+
+        <div class="card">
+          <span class="cardlabel">Data</span>
+          <p class="muted">The export contains measurements, quality results and protocol labels.
+            It contains no images, because none are stored.</p>
+          <!-- File AND Copy, exactly as the backup card does it: a Capacitor WebView with no
+               DownloadListener drops blob downloads silently (README "Backups"), so on the actual
+               target device Copy is the path that works. -->
+          <div class="row">
+            <button id="face-export" type="button">Export file</button>
+            <button id="face-export-copy" type="button">Copy</button>
+          </div>
+          <textarea id="face-export-text" rows="2" placeholder="Exported JSON appears here if the copy fails" style="margin-top:8px"></textarea>
+
+          <label class="fieldlabel" style="margin-top:12px;display:flex;gap:8px;align-items:flex-start">
+            <input type="checkbox" id="face-consent">
+            <span>Keep validation images, so you can look at why a measurement failed. An image is
+              produced only when you press the button below. The app never stores it, never uploads
+              it, and never sends it to Gemini — it is handed to your device and then forgotten.</span>
+          </label>
+          <button id="face-download" type="button" style="margin-top:8px">Show this capture as an image</button>
+          <img id="face-shot" hidden alt="The capture just taken, for inspection" style="width:100%;margin-top:8px;border:1px solid var(--outline-variant)">
+          <p class="muted data" id="face-lab-note"></p>
+        </div>
+
+        <div class="card">
+          <span class="cardlabel">Delete</span>
+          <p class="muted">Removes every capture, the canonical reference, protocol progress and the
+            consent record. Training, food, sleep and mood are untouched.</p>
+          <button id="face-forget" type="button">Delete all face data</button>
+        </div>
       </div>
     </div>
   </section>
@@ -969,14 +1101,15 @@
     <div class="body" id="progress-body">
       <div class="card" id="trend-card">
         <div class="line">
-          <span class="cardlabel" style="color:var(--train)">Bodyweight · Calories</span>
-          <span class="cardlabel" id="trend-drift"></span>
+          <span class="cardlabel">28 day trend</span>
+          <span class="instrument" id="trend-drift"></span>
+        </div>
+        <div class="legend">
+          <span><i style="background:var(--train)"></i>BW</span>
+          <span><i style="background:var(--eat)"></i>Cal</span>
         </div>
         <svg id="coach-chart" viewBox="0 0 320 150" preserveAspectRatio="none"></svg>
-        <div class="legend">
-          <span><i style="background:var(--train)"></i>Bodyweight</span>
-          <span><i style="background:var(--eat)"></i>Calories</span>
-        </div>
+        <div class="axis"><span>Day 1</span><span>Day 28</span></div>
       </div>
       <div id="progress-dyn" style="display:flex;flex-direction:column;gap:var(--stack)"></div>
     </div>

@@ -275,6 +275,75 @@ export function steadiness(state, accepted) {
 export const STEADY_FRAMES = 20;
 
 /**
+ * Which checks stop a capture, and which only stop a COMPARISON.
+ *
+ * The distinction is the one thing a single confidence percentage destroyed. A blurry photograph is
+ * not a measurement of anything and there is nothing to do with it but take another. A perfectly
+ * sharp, perfectly framed photograph taken under a different lamp is a fine photograph and a bad
+ * partner for the thirty before it — it is worth storing, worth showing, and not worth comparing.
+ *
+ * Collapsing those two into one number told the person "72%" and told them nothing about which of
+ * the two situations they were in, or what to do about it.
+ */
+export const BLOCKING = ['framing', 'pose', 'sharpness', 'exposure'];
+export const COMPARABILITY = ['balance', 'lighting'];
+
+/** What each check is about, in words a person can act on. Used by the dev panel and the HUD. */
+export const LABELS = {
+  framing: 'Distance and framing',
+  pose: 'Head angle',
+  sharpness: 'Focus',
+  exposure: 'Brightness',
+  balance: 'Even lighting',
+  lighting: 'Match with your usual light',
+};
+
+/**
+ * The structured verdict the pipeline runs on.
+ *
+ * `accepted` means every blocking check passed and the capture is worth measuring and storing.
+ * `comparable` means it may also be set beside this person's history. A capture can be accepted and
+ * not comparable, and that combination is common and useful — it is stored, and the trend layer
+ * declines to use it rather than the app declining to take it.
+ *
+ * A check that was never run — because no pixels were read yet, which is every preview frame — is
+ * ABSENT from `checks` rather than present with a zero. A zero would read as a failed check.
+ */
+export function gate(parts) {
+  const checks = {};
+  for (const [name, p] of Object.entries(parts)) {
+    if (!p || typeof p.score !== 'number') continue;
+    checks[name] = {
+      score: Math.round(p.score * 100) / 100,
+      pass: !p.reason,
+      reason: p.reason ?? null,
+      label: LABELS[name] ?? name,
+      ...(typeof p.value === 'number' ? { value: p.value } : {}),
+      ...(Array.isArray(p.clipped) && p.clipped.length ? { clipped: p.clipped } : {}),
+    };
+  }
+
+  const named = (list) => list.filter((k) => checks[k] && !checks[k].pass);
+  const failures = named(BLOCKING);
+  const warnings = named(COMPARABILITY);
+  const missing = BLOCKING.filter((k) => !checks[k]);
+
+  return {
+    // Missing a blocking check is not a pass. A capture measured before the pixel checks existed
+    // must never be recorded as though it had passed them.
+    accepted: failures.length === 0 && missing.length === 0,
+    comparable: failures.length === 0 && missing.length === 0 && warnings.length === 0,
+    checks,
+    failures,
+    warnings,
+    missing,
+    instruction: guide(parts).instruction,
+    // Kept for the record and for triage, deliberately not shown to anyone. See the note above.
+    overall: assess(parts).overall,
+  };
+}
+
+/**
  * One verdict from all of it.
  *
  * Combined as a WEIGHTED MINIMUM, not an average. A capture that is perfect in four ways and

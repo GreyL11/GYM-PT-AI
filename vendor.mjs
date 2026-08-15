@@ -44,6 +44,19 @@ MODELS.push({
   url: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
 });
 
+// Skin segmentation. 16 MB, and by far the largest single asset in the app — deliberately, after
+// the size constraint was lifted and the decision re-argued on value. It exists to answer one
+// question the landmark mesh structurally cannot: is this pixel face skin, or is it hair? A patch
+// has no idea what is inside it, and a fringe that falls differently on different days is
+// indistinguishable from a real change in the skin underneath it.
+//
+// float32 is not a choice. It is the only variant published — float16, int8 and a 512x512 build all
+// return 404 from this CDN.
+MODELS.push({
+  file: 'selfie_multiclass_256x256.tflite',
+  url: 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite',
+});
+
 // Google Fonts serves woff2 only to browser user agents; node's default UA gets ttf.
 const FONT_CSS = 'https://fonts.googleapis.com/css2?family=Inter:wght@500;700;800;900&family=JetBrains+Mono:wght@700&display=swap';
 const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';

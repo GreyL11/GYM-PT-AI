@@ -12,6 +12,8 @@ const SHELL = [
   'boxing.js', 'devcheck.js',
   'mood.js', 'mood_insights.js', 'checks.js', 'chat.js', 't_inputs.js', 'skin.js',
   'face/geometry.js', 'face/quality.js', 'face/model.js', 'face/checkin.js', 'digest.js',
+  'face/topology.js', 'face/registration.js', 'face/mask.js', 'face/features.js',
+  'face/validation.js', 'face/record.js', 'face/pipeline.js', 'face/protocol.js',
   'evidence.js', 'claims.js', 'validate.js', 'explain.js',
 ];
 

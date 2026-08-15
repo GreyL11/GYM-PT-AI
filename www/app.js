@@ -557,9 +557,13 @@ function showToday() {
     // in a way that six identical tiles never did.
     b.querySelector('.no').textContent = done.has(item.exId) ? '✓' : String(i + 1).padStart(2, '0');
     b.querySelector('.nm').textContent = item.name;
-    b.querySelector('.meta').textContent = done.has(item.exId)
-      ? 'Done'
-      : `${item.sets}×${item.reps} · ${item.load ? `${item.load} kg` : 'BW'}`;
+    // Value then unit, the way the design sets an instrument reading: 4×8 REPS.
+    const meta = b.querySelector('.meta');
+    meta.textContent = done.has(item.exId) ? '' : `${item.sets}×${item.reps}`;
+    const unit = document.createElement('span');
+    unit.className = 'u';
+    unit.textContent = done.has(item.exId) ? 'Done' : 'reps';
+    meta.appendChild(unit);
     if (done.has(item.exId)) b.classList.add('done');
     b.addEventListener('click', () => showSetup(item.exId, item));
     el.todayList.appendChild(b);
@@ -1145,7 +1149,8 @@ function showProgress() {
   // Per-lift strength and stalls.
   for (const lift of s.lifts) {
     const card = node('div', 'card');
-    card.append(node('h2', null, lift.name));
+    // A lift is a name, not a section label — set like the key-lift rows in the design.
+    card.append(node('h2', 'name', lift.name));
     if (lift.strength) {
       const { current, changePct, days, sessions } = lift.strength;
       card.append(line('Est. 1RM', `${current} kg`));
